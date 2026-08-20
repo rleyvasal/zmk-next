@@ -1,0 +1,51 @@
+# Copyright (c) 2026 The ZMK Next Contributors
+# SPDX-License-Identifier: MIT
+
+menuconfig ZMK_RUNTIME_CONFIG
+    bool "ZMK Next runtime configuration"
+    depends on !ZMK_SPLIT || ZMK_SPLIT_ROLE_CENTRAL
+    help
+      Enable the bounded ZMK Next runtime-configuration foundation. This
+      initial option only provides an in-memory snapshot model, capability
+      report, and snapshot validation. It does not alter key processing,
+      storage, or the Studio RPC protocol.
+
+if ZMK_RUNTIME_CONFIG
+
+config ZMK_RUNTIME_MAX_OBJECTS
+    int "Maximum runtime objects"
+    range 1 255
+    default 64
+    help
+      Fixed capacity for user-defined runtime behavior objects.
+
+config ZMK_RUNTIME_MAX_COMBOS
+    int "Maximum runtime combos"
+    range 1 255
+    default 32
+    help
+      Fixed capacity for runtime combo definitions.
+
+config ZMK_RUNTIME_MAX_COMBO_KEYS
+    int "Maximum keys in one runtime combo"
+    range 1 16
+    default 5
+    help
+      Maximum number of logical key positions allowed in one runtime combo.
+
+config ZMK_RUNTIME_MAX_MACRO_STEPS
+    int "Maximum runtime macro steps"
+    range 1 4096
+    default 512
+    help
+      Fixed capacity for macro instructions across a runtime configuration.
+
+config ZMK_RUNTIME_MAX_PERSISTED_BYTES
+    int "Maximum runtime configuration persistence size"
+    range 256 65535
+    default 4096
+    help
+      Maximum serialized runtime configuration size. The on-flash format is
+      private to the firmware and is not implemented in this phase.
+
+endif

@@ -277,6 +277,8 @@ endif # ZMK_KEYMAP_SETTINGS_STORAGE
 
 endmenu # Keymaps
 
+rsource "src/runtime_config/Kconfig"
+
 rsource "src/studio/Kconfig"
 
 menu "Display/LED Options"
