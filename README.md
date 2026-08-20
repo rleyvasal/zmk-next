@@ -11,3 +11,8 @@ runtime dispatch, safe activation, and persistent configuration generations.
 
 The initial architecture is documented in
 [`docs/architecture/runtime-config.md`](docs/architecture/runtime-config.md).
+
+ZMK Next is based on [ZMK Firmware](https://zmk.dev/), the MIT-licensed keyboard
+firmware built on the [Zephyr Project](https://www.zephyrproject.org/) RTOS. The
+upstream documentation and community remain the reference for its compiled
+hardware, transport, and behavior foundations.

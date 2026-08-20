@@ -1,0 +1,17 @@
+file_format: "1"
+id: pro_micro
+name: Pro Micro
+type: interconnect
+url: https://www.sparkfun.com/products/12640
+manufacturer: SparkFun
+description: |
+  The SparkFun Pro Micro grew popular as a low cost ATmega32U4 board with sufficient GPIO and peripherals
+  to work for many keyboard needs. Since the original Pro Micro, many pin compatible boards have appeared
+  with various changes or improvements.
+node_labels:
+  gpio: pro_micro
+  i2c: pro_micro_i2c
+  spi: pro_micro_spi
+  uart: pro_micro_serial
+design_guideline: |
+  ZMK uses the blue color coded "Arduino" pin names to generate devicetree node references. For example, to refer to the pin labeled `0` in the diagram, use `&pro_micro 0` in the devicetree files.
