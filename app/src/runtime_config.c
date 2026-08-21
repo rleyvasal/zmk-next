@@ -19,6 +19,7 @@ static struct {
         uint32_t id;
         size_t expected_size;
         size_t received_size;
+        bool validated;
     } update;
     uint32_t next_update_id;
 } staged_config;
@@ -172,6 +173,40 @@ int zmk_runtime_config_get_uploaded_snapshot(uint32_t update_id, const uint8_t *
     *snapshot_size = staged_config.update.expected_size;
 
     return 0;
+}
+
+int zmk_runtime_config_stage_uploaded_snapshot(
+    uint32_t update_id, const struct zmk_runtime_config_snapshot *snapshot,
+    struct zmk_runtime_config_validation_result *result) {
+    const uint8_t *serialized_snapshot;
+    size_t serialized_size;
+    int ret;
+
+    ret =
+        zmk_runtime_config_get_uploaded_snapshot(update_id, &serialized_snapshot, &serialized_size);
+    if (ret != 0) {
+        return ret;
+    }
+
+    (void)serialized_snapshot;
+    (void)serialized_size;
+
+    ret = zmk_runtime_config_stage_snapshot(snapshot, result);
+    staged_config.update.validated = ret == 0;
+
+    return ret;
+}
+
+int zmk_runtime_config_get_validated_uploaded_snapshot(uint32_t update_id,
+                                                       const uint8_t **snapshot_bytes,
+                                                       size_t *snapshot_size) {
+    int ret = zmk_runtime_config_get_uploaded_snapshot(update_id, snapshot_bytes, snapshot_size);
+
+    if (ret != 0) {
+        return ret;
+    }
+
+    return staged_config.update.validated ? 0 : -EINVAL;
 }
 
 int zmk_runtime_config_abort_update(uint32_t update_id) {

@@ -80,6 +80,7 @@ if ((NOT CONFIG_ZMK_SPLIT) OR CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
   target_sources(app PRIVATE src/events/keycode_state_changed.c)
   target_sources_ifdef(CONFIG_ZMK_RUNTIME_CONFIG app PRIVATE src/runtime_config.c)
   target_sources_ifdef(CONFIG_ZMK_RUNTIME_CONFIG app PRIVATE src/runtime_config_validate.c)
+  target_sources_ifdef(CONFIG_ZMK_RUNTIME_CONFIG app PRIVATE src/runtime_config_settings.c)
   target_sources_ifdef(CONFIG_ZMK_HID_INDICATORS app PRIVATE src/hid_indicators.c)
 
   if (CONFIG_ZMK_BLE)

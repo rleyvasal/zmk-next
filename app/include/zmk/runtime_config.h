@@ -114,6 +114,11 @@ struct zmk_runtime_config_validation_result {
     enum zmk_runtime_config_error error;
 };
 
+struct zmk_runtime_config_persistence_status {
+    bool has_persisted_snapshot;
+    uint32_t pending_generation;
+};
+
 void zmk_runtime_config_get_capabilities(struct zmk_runtime_capabilities *capabilities);
 void zmk_runtime_config_init_empty_snapshot(struct zmk_runtime_config_snapshot *snapshot);
 int zmk_runtime_config_validate_snapshot(const struct zmk_runtime_config_snapshot *snapshot,
@@ -129,5 +134,17 @@ int zmk_runtime_config_upload_update_chunk(uint32_t update_id, size_t offset, co
                                            size_t *next_offset);
 int zmk_runtime_config_get_uploaded_snapshot(uint32_t update_id, const uint8_t **snapshot_bytes,
                                              size_t *snapshot_size);
+int zmk_runtime_config_stage_uploaded_snapshot(uint32_t update_id,
+                                               const struct zmk_runtime_config_snapshot *snapshot,
+                                               struct zmk_runtime_config_validation_result *result);
+int zmk_runtime_config_get_validated_uploaded_snapshot(uint32_t update_id,
+                                                       const uint8_t **snapshot_bytes,
+                                                       size_t *snapshot_size);
 int zmk_runtime_config_abort_update(uint32_t update_id);
 size_t zmk_runtime_config_max_update_chunk_bytes(void);
+
+int zmk_runtime_config_persist_update(uint32_t update_id, uint32_t *generation);
+int zmk_runtime_config_get_persisted_snapshot(const uint8_t **snapshot_bytes, size_t *snapshot_size,
+                                              uint32_t *generation);
+void zmk_runtime_config_get_persistence_status(
+    struct zmk_runtime_config_persistence_status *status);

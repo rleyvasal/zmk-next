@@ -49,6 +49,9 @@ static zmk_runtime_config_RuntimeConfigErrorCode error_from_errno(int error) {
         return zmk_runtime_config_RuntimeConfigErrorCode_RUNTIME_CONFIG_ERROR_NOT_SUPPORTED;
     case -EBADMSG:
         return zmk_runtime_config_RuntimeConfigErrorCode_RUNTIME_CONFIG_ERROR_VALIDATION;
+    case -EIO:
+    case -ENOSYS:
+        return zmk_runtime_config_RuntimeConfigErrorCode_RUNTIME_CONFIG_ERROR_PERSISTENCE;
     default:
         return zmk_runtime_config_RuntimeConfigErrorCode_RUNTIME_CONFIG_ERROR_INVALID_REQUEST;
     }
@@ -76,6 +79,28 @@ zmk_studio_Response get_runtime_capabilities(const zmk_studio_Request *req) {
     response.limits.max_persisted_bytes = capabilities.max_persisted_bytes;
 
     return RUNTIME_CONFIG_RESPONSE(get_runtime_capabilities, response);
+}
+
+static void populate_status(zmk_runtime_config_RuntimeConfigStatus *status) {
+    struct zmk_runtime_config_persistence_status persistence;
+
+    zmk_runtime_config_get_persistence_status(&persistence);
+    status->state =
+        persistence.has_persisted_snapshot
+            ? zmk_runtime_config_RuntimeConfigState_RUNTIME_CONFIG_STATE_PERSISTED_PENDING_IDLE
+            : zmk_runtime_config_RuntimeConfigState_RUNTIME_CONFIG_STATE_ACTIVE;
+    status->active_generation = 0U;
+    status->pending_generation = persistence.pending_generation;
+}
+
+zmk_studio_Response get_runtime_config_status(const zmk_studio_Request *req) {
+    zmk_runtime_config_RuntimeConfigStatus response =
+        zmk_runtime_config_RuntimeConfigStatus_init_zero;
+
+    ARG_UNUSED(req);
+
+    populate_status(&response);
+    return RUNTIME_CONFIG_RESPONSE(get_runtime_config_status, response);
 }
 
 zmk_studio_Response begin_runtime_update(const zmk_studio_Request *req) {
@@ -236,7 +261,8 @@ zmk_studio_Response validate_runtime_update(const zmk_studio_Request *req) {
     }
 
     if (ret == 0) {
-        ret = zmk_runtime_config_stage_snapshot(&snapshot, &validation);
+        ret =
+            zmk_runtime_config_stage_uploaded_snapshot(request->update_id, &snapshot, &validation);
     }
 
     set_resource_usage(&response, ret == 0 ? &snapshot : NULL, serialized_size);
@@ -250,6 +276,29 @@ zmk_studio_Response validate_runtime_update(const zmk_studio_Request *req) {
     }
 
     return studio_response;
+}
+
+zmk_studio_Response commit_runtime_update(const zmk_studio_Request *req) {
+    const zmk_runtime_config_CommitRuntimeUpdateRequest *request =
+        &req->subsystem.runtime_config.request_type.commit_runtime_update;
+    zmk_runtime_config_CommitRuntimeUpdateResult response =
+        zmk_runtime_config_CommitRuntimeUpdateResult_init_zero;
+    int ret = zmk_runtime_config_persist_update(request->update_id, &response.generation);
+
+    if (ret != 0) {
+        zmk_studio_Response studio_response =
+            RUNTIME_CONFIG_RESPONSE(commit_runtime_update, response);
+
+        set_error(&studio_response, error_from_errno(ret));
+        return studio_response;
+    }
+
+    response.saved = true;
+    response.activation =
+        zmk_runtime_config_RuntimeConfigActivation_RUNTIME_CONFIG_ACTIVATION_PENDING_IDLE;
+    response.has_status = true;
+    populate_status(&response.status);
+    return RUNTIME_CONFIG_RESPONSE(commit_runtime_update, response);
 }
 
 zmk_studio_Response abort_runtime_update(const zmk_studio_Request *req) {
@@ -273,8 +322,11 @@ zmk_studio_Response abort_runtime_update(const zmk_studio_Request *req) {
 
 ZMK_RPC_SUBSYSTEM_HANDLER(runtime_config, get_runtime_capabilities,
                           ZMK_STUDIO_RPC_HANDLER_UNSECURED);
+ZMK_RPC_SUBSYSTEM_HANDLER(runtime_config, get_runtime_config_status,
+                          ZMK_STUDIO_RPC_HANDLER_UNSECURED);
 ZMK_RPC_SUBSYSTEM_HANDLER(runtime_config, begin_runtime_update, ZMK_STUDIO_RPC_HANDLER_SECURED);
 ZMK_RPC_SUBSYSTEM_HANDLER(runtime_config, upload_runtime_update_chunk,
                           ZMK_STUDIO_RPC_HANDLER_SECURED);
 ZMK_RPC_SUBSYSTEM_HANDLER(runtime_config, validate_runtime_update, ZMK_STUDIO_RPC_HANDLER_SECURED);
+ZMK_RPC_SUBSYSTEM_HANDLER(runtime_config, commit_runtime_update, ZMK_STUDIO_RPC_HANDLER_SECURED);
 ZMK_RPC_SUBSYSTEM_HANDLER(runtime_config, abort_runtime_update, ZMK_STUDIO_RPC_HANDLER_SECURED);

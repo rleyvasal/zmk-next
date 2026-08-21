@@ -65,4 +65,26 @@ config ZMK_RUNTIME_CONFIG_RPC_MAX_CHUNK_BYTES
       bounds RAM required for each decoded RPC request; complete snapshots are
       assembled in the fixed serialized-snapshot buffer.
 
+config ZMK_RUNTIME_CONFIG_PERSISTENCE
+    bool "Persist Runtime Config snapshots with Zephyr Settings"
+    depends on SETTINGS
+    default y
+    help
+      Store validated Runtime Config snapshots in two alternating Settings
+      slots. A manifest is written last so an interrupted update leaves the
+      prior complete slot recoverable.
+
+if ZMK_RUNTIME_CONFIG_PERSISTENCE
+
+config ZMK_RUNTIME_CONFIG_SETTINGS_CHUNK_BYTES
+    int "Runtime Config Settings payload chunk size"
+    range 64 1024
+    default 256
+    help
+      Maximum bytes stored in one Zephyr Settings key. This bounds Settings
+      write size while the complete snapshot remains bounded by
+      CONFIG_ZMK_RUNTIME_MAX_PERSISTED_BYTES.
+
+endif
+
 endif
