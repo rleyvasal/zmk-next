@@ -125,7 +125,7 @@ a binding held. Each running macro holds an activation blocker until it
 finishes, including while waiting or paused. Mod-morph and macro child actions
 are compiled bindings in this increment; runtime-object nesting is rejected
 until the object graph has a complete recursion and lifetime model. Layer
-metadata and tap-dances remain unsupported.
+metadata remains unsupported.
 
 Runtime combos use a fixed pool and accept a canonical list of stock logical
 key positions, a timeout, optional slow-release and require-prior-idle
@@ -149,6 +149,15 @@ not yet support nested runtime objects, positional triggers, retro-tap, or
 hold-while-undecided options; those remain Devicetree-only until their runtime
 semantics and lifetime rules are explicitly specified.
 
+Runtime tap-dances use a fixed shared action pool. Actions are numbered
+consecutively from one and each supplies compiled tap and hold bindings. On
+timeout or interruption, the engine selects the tap binding if the dance key
+is up and the hold binding if it is still down; it snapshots that selected
+binding for the matching release. The active generation remains blocked while
+the dance is collecting taps or holding its selected binding, so the action
+pool remains immutable for the invocation's lifetime. Runtime object nesting
+is not yet supported inside tap-dance actions.
+
 ## Runtime-editable scope
 
 Once their engines are implemented, ordinary key bindings, layer actions and
@@ -165,7 +174,7 @@ growth beyond build-time pools are not.
 4. Macros with timing and pause-until-release.
 5. Combos.
 6. Hold-taps with shared per-invocation state and activation blocking.
-7. Tap-dances after their invocation-lifetime tests are robust.
+7. Tap-dances with per-invocation selected bindings and activation blocking.
 
 Every increment retains compiled defaults as a recovery fallback and must pass
 decoder, validation, power-loss, activation, split, and resource-limit tests

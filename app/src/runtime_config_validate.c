@@ -42,7 +42,8 @@ int zmk_runtime_config_validate_snapshot(const struct zmk_runtime_config_snapsho
     if (snapshot->keymap_override_count > capabilities.max_keymap_overrides ||
         snapshot->object_count > capabilities.max_objects ||
         snapshot->combo_count > capabilities.max_combos ||
-        snapshot->macro_step_count > capabilities.max_macro_steps) {
+        snapshot->macro_step_count > capabilities.max_macro_steps ||
+        snapshot->tap_dance_action_count > capabilities.max_tap_dance_actions) {
         return invalidate(result, ZMK_RUNTIME_CONFIG_ERROR_RESOURCE_LIMIT, -ENOSPC);
     }
 

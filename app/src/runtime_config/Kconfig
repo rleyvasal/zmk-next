@@ -41,6 +41,14 @@ config ZMK_RUNTIME_MAX_MACRO_STEPS
     help
       Fixed capacity for macro instructions across a runtime configuration.
 
+config ZMK_RUNTIME_MAX_TAP_DANCE_ACTIONS
+    int "Maximum runtime tap-dance actions"
+    range 1 1024
+    default 64
+    help
+      Fixed shared capacity for tap-count actions across all runtime tap-dance
+      objects. Each action has a compiled tap binding and hold binding.
+
 config ZMK_RUNTIME_MAX_PERSISTED_BYTES
     int "Maximum runtime configuration persistence size"
     range 256 65535

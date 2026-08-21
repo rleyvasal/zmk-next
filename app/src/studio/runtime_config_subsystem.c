@@ -75,6 +75,7 @@ static bool encode_runtime_features(pb_ostream_t *stream, const pb_field_t *fiel
         zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_HOLD_TAPS,
         zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_HOLD_TAP_QUICK_TAP,
         zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_HOLD_TAP_REQUIRE_PRIOR_IDLE,
+        zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_TAP_DANCES,
     };
 
     ARG_UNUSED(arg);
@@ -94,6 +95,7 @@ static bool encode_runtime_object_types(pb_ostream_t *stream, const pb_field_t *
         zmk_runtime_config_RuntimeObjectType_RUNTIME_OBJECT_TYPE_MOD_MORPH,
         zmk_runtime_config_RuntimeObjectType_RUNTIME_OBJECT_TYPE_MACRO,
         zmk_runtime_config_RuntimeObjectType_RUNTIME_OBJECT_TYPE_HOLD_TAP,
+        zmk_runtime_config_RuntimeObjectType_RUNTIME_OBJECT_TYPE_TAP_DANCE,
     };
 
     ARG_UNUSED(arg);
@@ -126,6 +128,7 @@ zmk_studio_Response get_runtime_capabilities(const zmk_studio_Request *req) {
     response.limits.max_combos = capabilities.max_combos;
     response.limits.max_combo_keys = capabilities.max_combo_keys;
     response.limits.max_macro_steps = capabilities.max_macro_steps;
+    response.limits.max_tap_dance_actions = capabilities.max_tap_dance_actions;
     response.limits.max_persisted_bytes = capabilities.max_persisted_bytes;
     response.limits.max_layers = ZMK_KEYMAP_LAYERS_LEN;
     response.limits.max_keymap_overrides = capabilities.max_keymap_overrides;
@@ -219,6 +222,8 @@ struct snapshot_decode_context {
     uint16_t object_count;
     uint16_t combo_count;
     uint16_t macro_step_count;
+    uint16_t tap_dance_action_count;
+    uint16_t tap_dance_action_offset;
     int error;
     bool unsupported_content;
 };
@@ -358,6 +363,48 @@ static bool decode_macro_step(pb_istream_t *stream, const pb_field_t *field, voi
     return true;
 }
 
+static bool decode_tap_dance_action(pb_istream_t *stream, const pb_field_t *field, void **arg) {
+    struct snapshot_decode_context *context = *arg;
+    zmk_runtime_config_TapDanceAction wire_action =
+        zmk_runtime_config_TapDanceAction_init_zero;
+    struct zmk_runtime_tap_dance_action action = {0};
+    uint16_t expected_tap_count;
+    int ret;
+
+    ARG_UNUSED(field);
+
+    if (!pb_decode(stream, &zmk_runtime_config_TapDanceAction_msg, &wire_action) ||
+        !wire_action.has_tap_action || !wire_action.has_hold_action ||
+        context->tap_dance_action_count >= CONFIG_ZMK_RUNTIME_MAX_TAP_DANCE_ACTIONS) {
+        context->error = -EINVAL;
+        return false;
+    }
+
+    expected_tap_count = context->tap_dance_action_count - context->tap_dance_action_offset + 1U;
+    if (wire_action.tap_count != expected_tap_count) {
+        context->error = -EINVAL;
+        return false;
+    }
+
+    ret = decode_action_reference(&wire_action.tap_action, false, &action.tap_action);
+    if (ret == 0) {
+        ret = decode_action_reference(&wire_action.hold_action, false, &action.hold_action);
+    }
+    if (ret != 0) {
+        context->error = ret;
+        return false;
+    }
+
+    ret = zmk_runtime_config_append_staged_tap_dance_action(context->update_id, &action);
+    if (ret != 0) {
+        context->error = ret;
+        return false;
+    }
+
+    context->tap_dance_action_count++;
+    return true;
+}
+
 static bool decode_runtime_object(pb_istream_t *stream, const pb_field_t *field, void **arg) {
     struct snapshot_decode_context *context = *arg;
     struct zmk_runtime_object_slot object = {0};
@@ -466,9 +513,35 @@ static bool decode_runtime_object(pb_istream_t *stream, const pb_field_t *field,
             has_definition = true;
             break;
         }
-        case zmk_runtime_config_RuntimeObject_tap_dance_tag:
-            context->error = -ENOTSUP;
-            return false;
+        case zmk_runtime_config_RuntimeObject_tap_dance_tag: {
+            pb_istream_t substream;
+            zmk_runtime_config_TapDanceObject wire_tap_dance =
+                zmk_runtime_config_TapDanceObject_init_zero;
+            uint16_t action_offset = context->tap_dance_action_count;
+
+            context->tap_dance_action_offset = action_offset;
+            wire_tap_dance.actions.funcs.decode = decode_tap_dance_action;
+            wire_tap_dance.actions.arg = context;
+            if (has_definition || wire_type != PB_WT_STRING ||
+                !pb_make_string_substream(stream, &substream) ||
+                !pb_decode(&substream, &zmk_runtime_config_TapDanceObject_msg, &wire_tap_dance) ||
+                !pb_close_string_substream(stream, &substream) ||
+                context->tap_dance_action_count == action_offset ||
+                wire_tap_dance.tapping_term_ms == 0U) {
+                if (context->error == 0) {
+                    context->error = -EINVAL;
+                }
+                return false;
+            }
+
+            object.type = ZMK_RUNTIME_OBJECT_TYPE_TAP_DANCE;
+            object.data.tap_dance.action_offset = action_offset;
+            object.data.tap_dance.action_count =
+                context->tap_dance_action_count - action_offset;
+            object.data.tap_dance.tapping_term_ms = wire_tap_dance.tapping_term_ms;
+            has_definition = true;
+            break;
+        }
         default:
             if (!pb_skip_field(stream, wire_type)) {
                 return false;
@@ -622,6 +695,7 @@ static int decode_uploaded_snapshot(uint32_t update_id,
     snapshot->object_count = context.object_count;
     snapshot->combo_count = context.combo_count;
     snapshot->macro_step_count = context.macro_step_count;
+    snapshot->tap_dance_action_count = context.tap_dance_action_count;
     memcpy(snapshot->capability_fingerprint, wire_snapshot.capability_fingerprint.bytes,
            sizeof(snapshot->capability_fingerprint));
 
@@ -644,6 +718,10 @@ static void set_resource_usage(zmk_runtime_config_ValidationResult *response,
     response->resource_usage.has_macro_steps = true;
     response->resource_usage.macro_steps.used = snapshot ? snapshot->macro_step_count : 0U;
     response->resource_usage.macro_steps.limit = capabilities.max_macro_steps;
+    response->resource_usage.has_tap_dance_actions = true;
+    response->resource_usage.tap_dance_actions.used =
+        snapshot ? snapshot->tap_dance_action_count : 0U;
+    response->resource_usage.tap_dance_actions.limit = capabilities.max_tap_dance_actions;
     response->resource_usage.has_persisted_bytes = true;
     response->resource_usage.persisted_bytes.used = serialized_size;
     response->resource_usage.persisted_bytes.limit = capabilities.max_persisted_bytes;

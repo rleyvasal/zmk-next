@@ -11,7 +11,7 @@
 
 #include <zmk/behavior.h>
 
-#define ZMK_RUNTIME_CONFIG_PERSISTENCE_SCHEMA_VERSION 5U
+#define ZMK_RUNTIME_CONFIG_PERSISTENCE_SCHEMA_VERSION 6U
 #define ZMK_RUNTIME_CAPABILITY_FINGERPRINT_SIZE 16U
 #define ZMK_RUNTIME_OBJECT_ID_INVALID 0U
 #define ZMK_RUNTIME_DISPATCH_BEHAVIOR_NAME "runtime_object"
@@ -71,6 +71,22 @@ struct zmk_runtime_hold_tap_config {
     uint32_t require_prior_idle_ms;
 };
 
+/*
+ * A runtime tap dance has one action per consecutive tap count. The engine
+ * selects tap_action when the key is released when its term expires and
+ * hold_action when it is still physically pressed.
+ */
+struct zmk_runtime_tap_dance_action {
+    struct zmk_runtime_action_ref tap_action;
+    struct zmk_runtime_action_ref hold_action;
+};
+
+struct zmk_runtime_tap_dance_config {
+    uint16_t action_offset;
+    uint16_t action_count;
+    uint32_t tapping_term_ms;
+};
+
 struct zmk_runtime_object_slot {
     zmk_runtime_object_id_t id;
     enum zmk_runtime_object_type type;
@@ -78,6 +94,7 @@ struct zmk_runtime_object_slot {
         struct zmk_runtime_mod_morph_config mod_morph;
         struct zmk_runtime_macro_config macro;
         struct zmk_runtime_hold_tap_config hold_tap;
+        struct zmk_runtime_tap_dance_config tap_dance;
     } data;
 };
 
@@ -122,6 +139,7 @@ struct zmk_runtime_config_snapshot {
     uint16_t object_count;
     uint16_t combo_count;
     uint16_t macro_step_count;
+    uint16_t tap_dance_action_count;
 };
 
 struct zmk_runtime_config_pool {
@@ -134,6 +152,9 @@ struct zmk_runtime_config_pool {
     struct zmk_runtime_combo_slot combos[CONFIG_ZMK_RUNTIME_MAX_COMBOS];
     uint16_t macro_step_count;
     struct zmk_runtime_macro_step macro_steps[CONFIG_ZMK_RUNTIME_MAX_MACRO_STEPS];
+    uint16_t tap_dance_action_count;
+    struct zmk_runtime_tap_dance_action
+        tap_dance_actions[CONFIG_ZMK_RUNTIME_MAX_TAP_DANCE_ACTIONS];
     uint8_t serialized_bytes[CONFIG_ZMK_RUNTIME_MAX_PERSISTED_BYTES];
 };
 
@@ -144,6 +165,7 @@ struct zmk_runtime_capabilities {
     uint16_t max_combos;
     uint8_t max_combo_keys;
     uint16_t max_macro_steps;
+    uint16_t max_tap_dance_actions;
     uint16_t max_persisted_bytes;
     uint16_t max_keymap_overrides;
     uint32_t supported_object_types;
@@ -212,6 +234,8 @@ int zmk_runtime_config_set_staged_macro_steps(uint32_t update_id,
                                               size_t count);
 int zmk_runtime_config_append_staged_macro_step(uint32_t update_id,
                                                 const struct zmk_runtime_macro_step *step);
+int zmk_runtime_config_append_staged_tap_dance_action(
+    uint32_t update_id, const struct zmk_runtime_tap_dance_action *action);
 int zmk_runtime_config_get_validated_uploaded_snapshot(uint32_t update_id,
                                                        const uint8_t **snapshot_bytes,
                                                        size_t *snapshot_size);
@@ -234,6 +258,9 @@ size_t zmk_runtime_config_get_active_combo_count(void);
 int zmk_runtime_config_get_active_macro_steps(
     zmk_runtime_object_id_t object_id, const struct zmk_runtime_macro_step **steps,
     size_t *step_count);
+int zmk_runtime_config_get_active_tap_dance_actions(
+    zmk_runtime_object_id_t object_id, const struct zmk_runtime_tap_dance_action **actions,
+    size_t *action_count, uint32_t *tapping_term_ms);
 int zmk_runtime_config_action_ref_to_binding(const struct zmk_runtime_action_ref *action,
                                              struct zmk_behavior_binding *binding);
 
