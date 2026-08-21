@@ -39,15 +39,16 @@ int zmk_runtime_config_validate_snapshot(const struct zmk_runtime_config_snapsho
         return invalidate(result, ZMK_RUNTIME_CONFIG_ERROR_CAPABILITY_FINGERPRINT, -EXDEV);
     }
 
-    if (snapshot->object_count > capabilities.max_objects ||
+    if (snapshot->keymap_override_count > capabilities.max_keymap_overrides ||
+        snapshot->object_count > capabilities.max_objects ||
         snapshot->combo_count > capabilities.max_combos ||
         snapshot->macro_step_count > capabilities.max_macro_steps) {
         return invalidate(result, ZMK_RUNTIME_CONFIG_ERROR_RESOURCE_LIMIT, -ENOSPC);
     }
 
-    /* Phase 0 establishes the transaction boundary; content arrives in later phases. */
-    if (snapshot->keymap_override_count != 0 || snapshot->object_count != 0 ||
-        snapshot->combo_count != 0 || snapshot->macro_step_count != 0) {
+    /* The overlay is the first live content type. Advanced engines follow later. */
+    if (snapshot->object_count != 0 || snapshot->combo_count != 0 ||
+        snapshot->macro_step_count != 0) {
         return invalidate(result, ZMK_RUNTIME_CONFIG_ERROR_UNSUPPORTED_CONTENT, -ENOTSUP);
     }
 

@@ -10,8 +10,10 @@
 #include <zephyr/logging/log.h>
 
 #include <pb_decode.h>
+#include <pb_encode.h>
 
 #include <zmk/runtime_config.h>
+#include <zmk/keymap.h>
 #include <zmk/studio/rpc.h>
 
 LOG_MODULE_DECLARE(zmk_studio, CONFIG_ZMK_STUDIO_LOG_LEVEL);
@@ -48,6 +50,8 @@ static zmk_runtime_config_RuntimeConfigErrorCode error_from_errno(int error) {
     case -ENOTSUP:
         return zmk_runtime_config_RuntimeConfigErrorCode_RUNTIME_CONFIG_ERROR_NOT_SUPPORTED;
     case -EBADMSG:
+    case -EEXIST:
+    case -ENODEV:
         return zmk_runtime_config_RuntimeConfigErrorCode_RUNTIME_CONFIG_ERROR_VALIDATION;
     case -EIO:
     case -ENOSYS:
@@ -55,6 +59,23 @@ static zmk_runtime_config_RuntimeConfigErrorCode error_from_errno(int error) {
     default:
         return zmk_runtime_config_RuntimeConfigErrorCode_RUNTIME_CONFIG_ERROR_INVALID_REQUEST;
     }
+}
+
+static bool encode_runtime_features(pb_ostream_t *stream, const pb_field_t *field,
+                                    void *const *arg) {
+    const uint32_t features[] = {
+        zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_KEYMAP_OVERRIDES,
+    };
+
+    ARG_UNUSED(arg);
+
+    for (size_t i = 0; i < ARRAY_SIZE(features); i++) {
+        if (!pb_encode_tag_for_field(stream, field) || !pb_encode_varint(stream, features[i])) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 zmk_studio_Response get_runtime_capabilities(const zmk_studio_Request *req) {
@@ -77,6 +98,9 @@ zmk_studio_Response get_runtime_capabilities(const zmk_studio_Request *req) {
     response.limits.max_combo_keys = capabilities.max_combo_keys;
     response.limits.max_macro_steps = capabilities.max_macro_steps;
     response.limits.max_persisted_bytes = capabilities.max_persisted_bytes;
+    response.limits.max_layers = ZMK_KEYMAP_LAYERS_LEN;
+    response.limits.max_keymap_overrides = capabilities.max_keymap_overrides;
+    response.supported_features.funcs.encode = encode_runtime_features;
 
     return RUNTIME_CONFIG_RESPONSE(get_runtime_capabilities, response);
 }
@@ -160,6 +184,9 @@ zmk_studio_Response upload_runtime_update_chunk(const zmk_studio_Request *req) {
 }
 
 struct snapshot_decode_context {
+    uint32_t update_id;
+    uint16_t keymap_override_count;
+    int error;
     bool unsupported_content;
 };
 
@@ -171,6 +198,45 @@ static bool reject_snapshot_content(pb_istream_t *stream, const pb_field_t *fiel
 
     context->unsupported_content = true;
     return false;
+}
+
+static bool decode_keymap_override(pb_istream_t *stream, const pb_field_t *field, void **arg) {
+    struct snapshot_decode_context *context = *arg;
+    zmk_runtime_config_KeymapOverride wire_override =
+        zmk_runtime_config_KeymapOverride_init_zero;
+    struct zmk_runtime_keymap_override override;
+    int ret;
+
+    ARG_UNUSED(field);
+
+    if (!pb_decode(stream, &zmk_runtime_config_KeymapOverride_msg, &wire_override)) {
+        return false;
+    }
+
+    if (!wire_override.has_action ||
+        wire_override.action.which_target !=
+            zmk_runtime_config_ActionReference_compiled_behavior_tag ||
+        wire_override.layer_id > UINT8_MAX || wire_override.key_position > UINT16_MAX ||
+        wire_override.action.target.compiled_behavior.behavior_id > UINT16_MAX) {
+        context->error = -EINVAL;
+        return false;
+    }
+
+    override = (struct zmk_runtime_keymap_override){
+        .layer_id = wire_override.layer_id,
+        .key_position = wire_override.key_position,
+        .behavior_id = wire_override.action.target.compiled_behavior.behavior_id,
+        .param1 = wire_override.action.target.compiled_behavior.param1,
+        .param2 = wire_override.action.target.compiled_behavior.param2,
+    };
+    ret = zmk_runtime_config_append_staged_keymap_override(context->update_id, &override);
+    if (ret != 0) {
+        context->error = ret;
+        return false;
+    }
+
+    context->keymap_override_count++;
+    return true;
 }
 
 static int decode_uploaded_snapshot(uint32_t update_id,
@@ -187,7 +253,13 @@ static int decode_uploaded_snapshot(uint32_t update_id,
         return ret;
     }
 
-    wire_snapshot.keymap_overrides.funcs.decode = reject_snapshot_content;
+    ret = zmk_runtime_config_set_staged_keymap_overrides(update_id, NULL, 0U);
+    if (ret != 0) {
+        return ret;
+    }
+
+    context.update_id = update_id;
+    wire_snapshot.keymap_overrides.funcs.decode = decode_keymap_override;
     wire_snapshot.keymap_overrides.arg = &context;
     wire_snapshot.layers.funcs.decode = reject_snapshot_content;
     wire_snapshot.layers.arg = &context;
@@ -198,6 +270,9 @@ static int decode_uploaded_snapshot(uint32_t update_id,
 
     stream = pb_istream_from_buffer(snapshot_bytes, snapshot_size);
     if (!pb_decode(&stream, &zmk_runtime_config_RuntimeConfigSnapshot_msg, &wire_snapshot)) {
+        if (context.error != 0) {
+            return context.error;
+        }
         return context.unsupported_content ? -ENOTSUP : -EBADMSG;
     }
 
@@ -216,6 +291,7 @@ static int decode_uploaded_snapshot(uint32_t update_id,
     zmk_runtime_config_init_empty_snapshot(snapshot);
     snapshot->persistence_schema_version = wire_snapshot.persistence_schema_version;
     snapshot->generation = wire_snapshot.generation;
+    snapshot->keymap_override_count = context.keymap_override_count;
     memcpy(snapshot->capability_fingerprint, wire_snapshot.capability_fingerprint.bytes,
            sizeof(snapshot->capability_fingerprint));
 
@@ -242,6 +318,8 @@ static void set_resource_usage(zmk_runtime_config_ValidationResult *response,
     response->resource_usage.persisted_bytes.used = serialized_size;
     response->resource_usage.persisted_bytes.limit = capabilities.max_persisted_bytes;
     response->resource_usage.has_keymap_overrides = true;
+    response->resource_usage.keymap_overrides.used = snapshot ? snapshot->keymap_override_count : 0U;
+    response->resource_usage.keymap_overrides.limit = capabilities.max_keymap_overrides;
 }
 
 zmk_studio_Response validate_runtime_update(const zmk_studio_Request *req) {

@@ -103,10 +103,17 @@ is being captured, no hold-tap or tap-dance is undecided, no macro is running,
 and no action retains the old generation. The device reports whether a commit
 is active now or saved pending idle.
 
-The current safe-activation milestone tracks the logical active and pending
-generation, raw physical key state, and behavior-engine blocker leases. It
-does not yet change bindings at activation time: the following keymap-overlay
-and runtime-dispatch phases will consume the active generation.
+The current keymap-overlay milestone tracks the logical active and pending
+generation, raw physical key state, and behavior-engine blocker leases. A
+committed generation contains bounded overrides of compiled behavior bindings;
+the keymap reads an override only after that generation becomes active. The
+firmware serializes those validated overrides into its own private payload
+before A/B Settings persistence, rather than persisting a client protobuf.
+
+Version 0.1 currently accepts ordinary bindings and existing compiled layer
+actions with their normal parameters. Layer metadata, runtime object action
+references, and advanced engines remain deliberately unsupported until their
+dispatch and lifecycle implementations exist.
 
 ## Runtime-editable scope
 

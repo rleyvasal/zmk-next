@@ -7,8 +7,9 @@ menuconfig ZMK_RUNTIME_CONFIG
     help
       Enable bounded ZMK Next runtime configuration: the snapshot model,
       Studio RPC service, transactional Settings storage, and safe activation
-      coordinator. It does not yet replace compiled key processing; later
-      phases add the runtime keymap overlay and behavior dispatcher.
+      coordinator. It overlays compiled behavior bindings when an active
+      runtime snapshot supplies an override; later phases add runtime-object
+      dispatch and advanced behavior engines.
 
 if ZMK_RUNTIME_CONFIG
 
@@ -48,6 +49,15 @@ config ZMK_RUNTIME_MAX_PERSISTED_BYTES
       Maximum serialized runtime configuration size. The on-flash format is
       private to the firmware and stored transactionally when persistence is
       enabled.
+
+config ZMK_RUNTIME_MAX_KEYMAP_OVERRIDES
+    int "Maximum runtime keymap overrides"
+    range 1 4096
+    default 256
+    help
+      Fixed capacity for user-defined bindings that override the compiled
+      keymap. Positions are in stock logical-keymap space, independent of the
+      selected physical layout.
 
 config ZMK_RUNTIME_CONFIG_RPC
     bool "Expose runtime configuration through Studio RPC"

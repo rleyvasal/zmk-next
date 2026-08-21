@@ -50,8 +50,12 @@ static void runtime_config_activation_work_handler(struct k_work *work) {
     k_mutex_lock(&runtime_config_activation_lock, K_FOREVER);
     if (runtime_config_activation.status.pending_generation != 0U && activation_is_safe()) {
         generation = runtime_config_activation.status.pending_generation;
-        runtime_config_activation.status.active_generation = generation;
-        runtime_config_activation.status.pending_generation = 0U;
+        if (zmk_runtime_config_activate_pending_generation(generation) == 0) {
+            runtime_config_activation.status.active_generation = generation;
+            runtime_config_activation.status.pending_generation = 0U;
+        } else {
+            generation = 0U;
+        }
     }
     k_mutex_unlock(&runtime_config_activation_lock);
 

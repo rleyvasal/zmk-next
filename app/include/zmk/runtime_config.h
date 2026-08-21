@@ -55,6 +55,14 @@ struct zmk_runtime_combo_slot {
     struct zmk_runtime_action_ref output;
 };
 
+struct zmk_runtime_keymap_override {
+    uint8_t layer_id;
+    uint16_t key_position;
+    zmk_behavior_local_id_t behavior_id;
+    uint32_t param1;
+    uint32_t param2;
+};
+
 enum zmk_runtime_macro_step_type {
     ZMK_RUNTIME_MACRO_STEP_NONE = 0,
     ZMK_RUNTIME_MACRO_STEP_TAP = 1,
@@ -83,6 +91,9 @@ struct zmk_runtime_config_snapshot {
 };
 
 struct zmk_runtime_config_pool {
+    uint16_t keymap_override_count;
+    struct zmk_runtime_keymap_override
+        keymap_overrides[CONFIG_ZMK_RUNTIME_MAX_KEYMAP_OVERRIDES];
     struct zmk_runtime_object_slot objects[CONFIG_ZMK_RUNTIME_MAX_OBJECTS];
     struct zmk_runtime_combo_slot combos[CONFIG_ZMK_RUNTIME_MAX_COMBOS];
     struct zmk_runtime_macro_step macro_steps[CONFIG_ZMK_RUNTIME_MAX_MACRO_STEPS];
@@ -97,6 +108,7 @@ struct zmk_runtime_capabilities {
     uint8_t max_combo_keys;
     uint16_t max_macro_steps;
     uint16_t max_persisted_bytes;
+    uint16_t max_keymap_overrides;
     uint32_t supported_object_types;
 };
 
@@ -144,11 +156,24 @@ int zmk_runtime_config_get_uploaded_snapshot(uint32_t update_id, const uint8_t *
 int zmk_runtime_config_stage_uploaded_snapshot(uint32_t update_id,
                                                const struct zmk_runtime_config_snapshot *snapshot,
                                                struct zmk_runtime_config_validation_result *result);
+int zmk_runtime_config_set_staged_keymap_overrides(
+    uint32_t update_id, const struct zmk_runtime_keymap_override *overrides, size_t count);
+int zmk_runtime_config_append_staged_keymap_override(
+    uint32_t update_id, const struct zmk_runtime_keymap_override *override);
 int zmk_runtime_config_get_validated_uploaded_snapshot(uint32_t update_id,
                                                        const uint8_t **snapshot_bytes,
                                                        size_t *snapshot_size);
+int zmk_runtime_config_get_persistable_update(uint32_t update_id, const uint8_t **snapshot_bytes,
+                                              size_t *snapshot_size);
 int zmk_runtime_config_abort_update(uint32_t update_id);
 size_t zmk_runtime_config_max_update_chunk_bytes(void);
+
+int zmk_runtime_config_prepare_pending_update(uint32_t update_id, uint32_t generation);
+int zmk_runtime_config_prepare_persisted_generation(const uint8_t *snapshot_bytes,
+                                                     size_t snapshot_size, uint32_t generation);
+int zmk_runtime_config_activate_pending_generation(uint32_t generation);
+const struct zmk_behavior_binding *
+zmk_runtime_config_get_keymap_override(uint8_t layer_id, uint16_t key_position);
 
 int zmk_runtime_config_persist_update(uint32_t update_id, uint32_t *generation);
 int zmk_runtime_config_get_persisted_snapshot(const uint8_t **snapshot_bytes, size_t *snapshot_size,

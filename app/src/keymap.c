@@ -17,6 +17,9 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/matrix.h>
 #include <zmk/sensors.h>
 #include <zmk/virtual_key_position.h>
+#if IS_ENABLED(CONFIG_ZMK_RUNTIME_CONFIG)
+#include <zmk/runtime_config.h>
+#endif
 
 #include <zmk/event_manager.h>
 #include <zmk/events/position_state_changed.h>
@@ -267,6 +270,14 @@ zmk_keymap_get_layer_binding_at_idx(zmk_keymap_layer_id_t layer_id, uint16_t bin
         LOG_WRN("Binding index %d mapped to an invalid key position %d", binding_idx, mapped_idx);
         return NULL;
     }
+
+#if IS_ENABLED(CONFIG_ZMK_RUNTIME_CONFIG)
+    const struct zmk_behavior_binding *runtime_binding =
+        zmk_runtime_config_get_keymap_override(layer_id, mapped_idx);
+    if (runtime_binding) {
+        return runtime_binding;
+    }
+#endif
 
     return &zmk_keymap[layer_id][mapped_idx];
 }

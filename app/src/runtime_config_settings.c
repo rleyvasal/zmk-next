@@ -113,33 +113,53 @@ static bool generation_is_newer(uint32_t candidate, uint32_t current) {
 }
 
 static void select_newest_valid_slot(void) {
-    int newest_slot = -1;
+    bool rejected[RUNTIME_CONFIG_SETTINGS_SLOT_COUNT] = {false};
 
-    for (size_t slot = 0; slot < RUNTIME_CONFIG_SETTINGS_SLOT_COUNT; slot++) {
-        if (!slot_is_valid(&runtime_config_settings.slots[slot])) {
+    runtime_config_settings.selected_slot = -1;
+    runtime_config_settings.status = (struct zmk_runtime_config_persistence_status){0};
+
+    for (size_t attempt = 0; attempt < RUNTIME_CONFIG_SETTINGS_SLOT_COUNT; attempt++) {
+        int newest_slot = -1;
+
+        for (size_t slot = 0; slot < RUNTIME_CONFIG_SETTINGS_SLOT_COUNT; slot++) {
+            if (rejected[slot] || !slot_is_valid(&runtime_config_settings.slots[slot])) {
+                continue;
+            }
+
+            if (newest_slot < 0 ||
+                generation_is_newer(runtime_config_settings.slots[slot].manifest.generation,
+                                    runtime_config_settings.slots[newest_slot].manifest.generation)) {
+                newest_slot = slot;
+            }
+        }
+
+        if (newest_slot < 0) {
+            break;
+        }
+
+        const struct runtime_config_settings_slot *slot =
+            &runtime_config_settings.slots[newest_slot];
+        uint32_t generation = slot->manifest.generation;
+        int ret = zmk_runtime_config_prepare_persisted_generation(
+            slot->payload, slot->manifest.payload_length, generation);
+
+        if (ret != 0) {
+            LOG_ERR("Rejected invalid Runtime Config generation %u from slot %s (%d)", generation,
+                    slot_name(newest_slot), ret);
+            rejected[newest_slot] = true;
             continue;
         }
 
-        if (newest_slot < 0 ||
-            generation_is_newer(runtime_config_settings.slots[slot].manifest.generation,
-                                runtime_config_settings.slots[newest_slot].manifest.generation)) {
-            newest_slot = slot;
-        }
+        runtime_config_settings.selected_slot = newest_slot;
+        runtime_config_settings.status.has_persisted_snapshot = true;
+        runtime_config_settings.status.persisted_generation = generation;
+        LOG_INF("Selected Runtime Config generation %u from slot %s", generation,
+                slot_name(newest_slot));
+        (void)zmk_runtime_config_request_activation(generation);
+        return;
     }
 
-    runtime_config_settings.selected_slot = newest_slot;
-    runtime_config_settings.status.has_persisted_snapshot = newest_slot >= 0;
-    runtime_config_settings.status.persisted_generation =
-        newest_slot >= 0 ? runtime_config_settings.slots[newest_slot].manifest.generation : 0U;
-
-    if (newest_slot >= 0) {
-        LOG_INF("Selected Runtime Config generation %u from slot %s",
-                runtime_config_settings.status.persisted_generation, slot_name(newest_slot));
-        (void)zmk_runtime_config_request_activation(
-            runtime_config_settings.status.persisted_generation);
-    } else {
-        LOG_INF("No valid persisted Runtime Config snapshot found");
-    }
+    LOG_INF("No valid persisted Runtime Config snapshot found");
 }
 
 static int read_exact(settings_read_cb read_cb, void *cb_arg, void *destination, size_t len) {
@@ -261,7 +281,7 @@ int zmk_runtime_config_persist_update(uint32_t update_id, uint32_t *generation) 
         return -EINVAL;
     }
 
-    ret = zmk_runtime_config_get_validated_uploaded_snapshot(update_id, &payload, &payload_size);
+    ret = zmk_runtime_config_get_persistable_update(update_id, &payload, &payload_size);
     if (ret != 0) {
         return ret;
     }
@@ -330,6 +350,11 @@ int zmk_runtime_config_persist_update(uint32_t update_id, uint32_t *generation) 
     runtime_config_settings.status.has_persisted_snapshot = true;
     runtime_config_settings.status.persisted_generation = manifest.generation;
     *generation = manifest.generation;
+
+    ret = zmk_runtime_config_prepare_pending_update(update_id, manifest.generation);
+    if (ret != 0) {
+        return ret;
+    }
 
     ret = zmk_runtime_config_request_activation(manifest.generation);
     if (ret != 0) {
