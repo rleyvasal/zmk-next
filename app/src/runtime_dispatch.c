@@ -11,6 +11,7 @@
 
 #include <zmk/hid.h>
 #include <zmk/matrix.h>
+#include <zmk/behavior_hold_tap.h>
 #include <zmk/runtime_config.h>
 #include <zmk/runtime_dispatch.h>
 #include <zmk/virtual_key_position.h>
@@ -294,6 +295,30 @@ static int dispatch_macro(const struct zmk_runtime_object_slot *object,
     return ZMK_BEHAVIOR_OPAQUE;
 }
 
+static int dispatch_hold_tap(const struct zmk_runtime_object_slot *object,
+                             struct zmk_behavior_binding_event event, bool pressed) {
+    const struct zmk_runtime_hold_tap_config *config = &object->data.hold_tap;
+    struct zmk_behavior_binding tap_binding;
+    struct zmk_behavior_binding hold_binding;
+    int ret;
+
+    if (!pressed) {
+        return zmk_behavior_hold_tap_runtime_released(event);
+    }
+
+    ret = zmk_runtime_config_action_ref_to_binding(&config->tap_action, &tap_binding);
+    if (ret != 0) {
+        return ret;
+    }
+
+    ret = zmk_runtime_config_action_ref_to_binding(&config->hold_action, &hold_binding);
+    if (ret != 0) {
+        return ret;
+    }
+
+    return zmk_behavior_hold_tap_runtime_pressed(config, &tap_binding, &hold_binding, event);
+}
+
 int zmk_runtime_dispatch_object(zmk_runtime_object_id_t object_id,
                                 struct zmk_behavior_binding_event event, bool pressed) {
     const struct zmk_runtime_object_slot *object =
@@ -308,6 +333,8 @@ int zmk_runtime_dispatch_object(zmk_runtime_object_id_t object_id,
         return dispatch_mod_morph(object, event, pressed);
     case ZMK_RUNTIME_OBJECT_TYPE_MACRO:
         return dispatch_macro(object, event, pressed);
+    case ZMK_RUNTIME_OBJECT_TYPE_HOLD_TAP:
+        return dispatch_hold_tap(object, event, pressed);
     default:
         return -ENOTSUP;
     }

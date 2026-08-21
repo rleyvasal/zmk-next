@@ -125,7 +125,7 @@ a binding held. Each running macro holds an activation blocker until it
 finishes, including while waiting or paused. Mod-morph and macro child actions
 are compiled bindings in this increment; runtime-object nesting is rejected
 until the object graph has a complete recursion and lifetime model. Layer
-metadata, hold-taps, and tap-dances remain unsupported.
+metadata and tap-dances remain unsupported.
 
 Runtime combos use a fixed pool and accept a canonical list of stock logical
 key positions, a timeout, optional slow-release and require-prior-idle
@@ -137,6 +137,17 @@ replacing or deleting a compiled default requires explicit baseline-management
 protocol support. A captured runtime combo retains an activation blocker until
 its final source-key release, so its saved output binding remains valid while
 the combo completes.
+
+Runtime hold-taps reuse ZMK's existing hold-tap state machine. A runtime
+object supplies compiled tap and hold actions, one of the four standard
+flavors, a tapping term, and optional quick-tap and require-prior-idle times.
+At press time, the engine copies both resolved child bindings and the hold-tap
+settings into its per-press record; it retains an activation blocker until the
+matching release has completed. Consequently a generation cannot activate
+mid-decision or change the binding paired with a release. Runtime hold-taps do
+not yet support nested runtime objects, positional triggers, retro-tap, or
+hold-while-undecided options; those remain Devicetree-only until their runtime
+semantics and lifetime rules are explicitly specified.
 
 ## Runtime-editable scope
 
@@ -153,7 +164,8 @@ growth beyond build-time pools are not.
 3. Action references, the runtime dispatcher, and mod-morphs.
 4. Macros with timing and pause-until-release.
 5. Combos.
-6. Hold-taps and tap-dances after their invocation-lifetime tests are robust.
+6. Hold-taps with shared per-invocation state and activation blocking.
+7. Tap-dances after their invocation-lifetime tests are robust.
 
 Every increment retains compiled defaults as a recovery fallback and must pass
 decoder, validation, power-loss, activation, split, and resource-limit tests

@@ -46,7 +46,7 @@ static struct {
 } pending_config, active_config;
 
 #define RUNTIME_CONFIG_PERSISTED_PAYLOAD_MAGIC 0x5A4E4B4FU
-#define RUNTIME_CONFIG_PERSISTED_PAYLOAD_VERSION 4U
+#define RUNTIME_CONFIG_PERSISTED_PAYLOAD_VERSION 5U
 
 struct runtime_config_persisted_payload_header {
     uint32_t magic;
@@ -82,12 +82,22 @@ struct runtime_config_persisted_macro {
     uint16_t step_count;
 } __packed;
 
+struct runtime_config_persisted_hold_tap {
+    struct runtime_config_persisted_action_ref tap_action;
+    struct runtime_config_persisted_action_ref hold_action;
+    uint8_t flavor;
+    uint32_t tapping_term_ms;
+    uint32_t quick_tap_ms;
+    uint32_t require_prior_idle_ms;
+} __packed;
+
 struct runtime_config_persisted_object {
     zmk_runtime_object_id_t id;
     uint8_t type;
     union {
         struct runtime_config_persisted_mod_morph mod_morph;
         struct runtime_config_persisted_macro macro;
+        struct runtime_config_persisted_hold_tap hold_tap;
     } data;
 } __packed;
 
@@ -381,6 +391,20 @@ static int validate_object(const struct zmk_runtime_object_slot *object,
         }
 
         return validate_macro_press_release_balance(&macro_steps[offset], count);
+    }
+    case ZMK_RUNTIME_OBJECT_TYPE_HOLD_TAP: {
+        const struct zmk_runtime_hold_tap_config *config = &object->data.hold_tap;
+
+        if (config->flavor < ZMK_RUNTIME_HOLD_TAP_FLAVOR_HOLD_PREFERRED ||
+            config->flavor > ZMK_RUNTIME_HOLD_TAP_FLAVOR_TAP_UNLESS_INTERRUPTED ||
+            config->tapping_term_ms == 0U || config->tapping_term_ms > INT32_MAX ||
+            config->quick_tap_ms > INT32_MAX || config->require_prior_idle_ms > INT32_MAX ||
+            action_to_binding(&config->tap_action, NULL, 0U, false, &binding) != 0 ||
+            action_to_binding(&config->hold_action, NULL, 0U, false, &binding) != 0) {
+            return -EINVAL;
+        }
+
+        return 0;
     }
     default:
         return -ENOTSUP;
@@ -987,6 +1011,16 @@ int zmk_runtime_config_get_persistable_update(uint32_t update_id, const uint8_t 
                 .step_count = source->data.macro.step_count,
             };
             break;
+        case ZMK_RUNTIME_OBJECT_TYPE_HOLD_TAP:
+            destination.data.hold_tap = (struct runtime_config_persisted_hold_tap){
+                .tap_action = persist_action(&source->data.hold_tap.tap_action),
+                .hold_action = persist_action(&source->data.hold_tap.hold_action),
+                .flavor = source->data.hold_tap.flavor,
+                .tapping_term_ms = source->data.hold_tap.tapping_term_ms,
+                .quick_tap_ms = source->data.hold_tap.quick_tap_ms,
+                .require_prior_idle_ms = source->data.hold_tap.require_prior_idle_ms,
+            };
+            break;
         default:
             return -EINVAL;
         }
@@ -1188,6 +1222,17 @@ int zmk_runtime_config_prepare_persisted_generation(const uint8_t *snapshot_byte
                 .step_offset = source.data.macro.step_offset,
                 .step_count = source.data.macro.step_count,
             };
+            break;
+        case ZMK_RUNTIME_OBJECT_TYPE_HOLD_TAP:
+            staged_config.pool.objects[i].data.hold_tap =
+                (struct zmk_runtime_hold_tap_config){
+                    .tap_action = restore_action(&source.data.hold_tap.tap_action),
+                    .hold_action = restore_action(&source.data.hold_tap.hold_action),
+                    .flavor = source.data.hold_tap.flavor,
+                    .tapping_term_ms = source.data.hold_tap.tapping_term_ms,
+                    .quick_tap_ms = source.data.hold_tap.quick_tap_ms,
+                    .require_prior_idle_ms = source.data.hold_tap.require_prior_idle_ms,
+                };
             break;
         default:
             return -EBADMSG;

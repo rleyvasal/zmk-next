@@ -11,7 +11,7 @@
 
 #include <zmk/behavior.h>
 
-#define ZMK_RUNTIME_CONFIG_PERSISTENCE_SCHEMA_VERSION 4U
+#define ZMK_RUNTIME_CONFIG_PERSISTENCE_SCHEMA_VERSION 5U
 #define ZMK_RUNTIME_CAPABILITY_FINGERPRINT_SIZE 16U
 #define ZMK_RUNTIME_OBJECT_ID_INVALID 0U
 #define ZMK_RUNTIME_DISPATCH_BEHAVIOR_NAME "runtime_object"
@@ -55,12 +55,29 @@ struct zmk_runtime_macro_config {
     uint16_t step_count;
 };
 
+enum zmk_runtime_hold_tap_flavor {
+    ZMK_RUNTIME_HOLD_TAP_FLAVOR_HOLD_PREFERRED = 1,
+    ZMK_RUNTIME_HOLD_TAP_FLAVOR_BALANCED = 2,
+    ZMK_RUNTIME_HOLD_TAP_FLAVOR_TAP_PREFERRED = 3,
+    ZMK_RUNTIME_HOLD_TAP_FLAVOR_TAP_UNLESS_INTERRUPTED = 4,
+};
+
+struct zmk_runtime_hold_tap_config {
+    struct zmk_runtime_action_ref tap_action;
+    struct zmk_runtime_action_ref hold_action;
+    enum zmk_runtime_hold_tap_flavor flavor;
+    uint32_t tapping_term_ms;
+    uint32_t quick_tap_ms;
+    uint32_t require_prior_idle_ms;
+};
+
 struct zmk_runtime_object_slot {
     zmk_runtime_object_id_t id;
     enum zmk_runtime_object_type type;
     union {
         struct zmk_runtime_mod_morph_config mod_morph;
         struct zmk_runtime_macro_config macro;
+        struct zmk_runtime_hold_tap_config hold_tap;
     } data;
 };
 

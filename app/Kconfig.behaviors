@@ -45,7 +45,7 @@ endif
 config ZMK_BEHAVIOR_HOLD_TAP
     bool
     default y
-    depends on DT_HAS_ZMK_BEHAVIOR_HOLD_TAP_ENABLED
+    depends on DT_HAS_ZMK_BEHAVIOR_HOLD_TAP_ENABLED || ZMK_RUNTIME_CONFIG
 
 if ZMK_BEHAVIOR_HOLD_TAP
 

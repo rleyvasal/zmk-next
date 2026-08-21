@@ -184,11 +184,13 @@ static int initialize_combo(size_t index) {
     return 0;
 }
 
+#if IS_ENABLED(CONFIG_ZMK_RUNTIME_CONFIG)
 static void clear_combo_lookup(size_t index) {
     for (size_t position = 0; position < ZMK_KEYMAP_LEN; position++) {
         sys_bitfield_clear_bit((mem_addr_t)&combo_lookup[position], index);
     }
 }
+#endif
 
 #if IS_ENABLED(CONFIG_ZMK_RUNTIME_CONFIG)
 void zmk_combo_runtime_config_refresh(void) {

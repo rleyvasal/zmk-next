@@ -72,6 +72,9 @@ static bool encode_runtime_features(pb_ostream_t *stream, const pb_field_t *fiel
         zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_COMBOS,
         zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_COMBO_SLOW_RELEASE,
         zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_COMBO_REQUIRE_PRIOR_IDLE,
+        zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_HOLD_TAPS,
+        zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_HOLD_TAP_QUICK_TAP,
+        zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_HOLD_TAP_REQUIRE_PRIOR_IDLE,
     };
 
     ARG_UNUSED(arg);
@@ -90,6 +93,7 @@ static bool encode_runtime_object_types(pb_ostream_t *stream, const pb_field_t *
     const uint32_t types[] = {
         zmk_runtime_config_RuntimeObjectType_RUNTIME_OBJECT_TYPE_MOD_MORPH,
         zmk_runtime_config_RuntimeObjectType_RUNTIME_OBJECT_TYPE_MACRO,
+        zmk_runtime_config_RuntimeObjectType_RUNTIME_OBJECT_TYPE_HOLD_TAP,
     };
 
     ARG_UNUSED(arg);
@@ -432,7 +436,36 @@ static bool decode_runtime_object(pb_istream_t *stream, const pb_field_t *field,
             has_definition = true;
             break;
         }
-        case zmk_runtime_config_RuntimeObject_hold_tap_tag:
+        case zmk_runtime_config_RuntimeObject_hold_tap_tag: {
+            pb_istream_t substream;
+            zmk_runtime_config_HoldTapObject wire_hold_tap =
+                zmk_runtime_config_HoldTapObject_init_zero;
+
+            if (has_definition || wire_type != PB_WT_STRING ||
+                !pb_make_string_substream(stream, &substream) ||
+                !pb_decode(&substream, &zmk_runtime_config_HoldTapObject_msg, &wire_hold_tap) ||
+                !pb_close_string_substream(stream, &substream) || !wire_hold_tap.has_tap_action ||
+                !wire_hold_tap.has_hold_action ||
+                wire_hold_tap.flavor <
+                    zmk_runtime_config_HoldTapFlavor_HOLD_TAP_FLAVOR_HOLD_PREFERRED ||
+                wire_hold_tap.flavor >
+                    zmk_runtime_config_HoldTapFlavor_HOLD_TAP_FLAVOR_TAP_UNLESS_INTERRUPTED ||
+                decode_action_reference(&wire_hold_tap.tap_action, false,
+                                        &object.data.hold_tap.tap_action) != 0 ||
+                decode_action_reference(&wire_hold_tap.hold_action, false,
+                                        &object.data.hold_tap.hold_action) != 0) {
+                context->error = -EINVAL;
+                return false;
+            }
+
+            object.type = ZMK_RUNTIME_OBJECT_TYPE_HOLD_TAP;
+            object.data.hold_tap.flavor = wire_hold_tap.flavor;
+            object.data.hold_tap.tapping_term_ms = wire_hold_tap.tapping_term_ms;
+            object.data.hold_tap.quick_tap_ms = wire_hold_tap.quick_tap_ms;
+            object.data.hold_tap.require_prior_idle_ms = wire_hold_tap.require_prior_idle_ms;
+            has_definition = true;
+            break;
+        }
         case zmk_runtime_config_RuntimeObject_tap_dance_tag:
             context->error = -ENOTSUP;
             return false;
