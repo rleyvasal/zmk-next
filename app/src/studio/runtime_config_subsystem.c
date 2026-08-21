@@ -69,6 +69,9 @@ static bool encode_runtime_features(pb_ostream_t *stream, const pb_field_t *fiel
         zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_MACROS,
         zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_MACRO_WAIT,
         zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_MACRO_PAUSE_UNTIL_RELEASE,
+        zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_COMBOS,
+        zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_COMBO_SLOW_RELEASE,
+        zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_COMBO_REQUIRE_PRIOR_IDLE,
     };
 
     ARG_UNUSED(arg);
@@ -210,6 +213,7 @@ struct snapshot_decode_context {
     uint32_t update_id;
     uint16_t keymap_override_count;
     uint16_t object_count;
+    uint16_t combo_count;
     uint16_t macro_step_count;
     int error;
     bool unsupported_content;
@@ -456,6 +460,64 @@ static bool decode_runtime_object(pb_istream_t *stream, const pb_field_t *field,
     return true;
 }
 
+struct combo_decode_context {
+    struct zmk_runtime_combo_slot combo;
+    int error;
+};
+
+static bool decode_combo_position(pb_istream_t *stream, const pb_field_t *field, void **arg) {
+    struct combo_decode_context *context = *arg;
+    uint32_t position = 0U;
+
+    ARG_UNUSED(field);
+
+    if (!pb_decode_varint(stream, &position) || position > UINT16_MAX ||
+        context->combo.key_count >= CONFIG_ZMK_RUNTIME_MAX_COMBO_KEYS) {
+        context->error = -EINVAL;
+        return false;
+    }
+
+    context->combo.positions[context->combo.key_count++] = position;
+    return true;
+}
+
+static bool decode_combo_definition(pb_istream_t *stream, const pb_field_t *field, void **arg) {
+    struct snapshot_decode_context *snapshot_context = *arg;
+    struct combo_decode_context combo_context = {0};
+    zmk_runtime_config_ComboDefinition wire_combo =
+        zmk_runtime_config_ComboDefinition_init_zero;
+    int ret;
+
+    ARG_UNUSED(field);
+
+    wire_combo.key_positions.funcs.decode = decode_combo_position;
+    wire_combo.key_positions.arg = &combo_context;
+    if (!pb_decode(stream, &zmk_runtime_config_ComboDefinition_msg, &wire_combo)) {
+        snapshot_context->error = combo_context.error != 0 ? combo_context.error : -EBADMSG;
+        return false;
+    }
+
+    if (wire_combo.id == ZMK_RUNTIME_OBJECT_ID_INVALID || !wire_combo.has_output ||
+        decode_action_reference(&wire_combo.output, true, &combo_context.combo.output) != 0) {
+        snapshot_context->error = -EINVAL;
+        return false;
+    }
+
+    combo_context.combo.id = wire_combo.id;
+    combo_context.combo.timeout_ms = wire_combo.timeout_ms;
+    combo_context.combo.require_prior_idle_ms = wire_combo.require_prior_idle_ms;
+    combo_context.combo.slow_release = wire_combo.slow_release;
+    ret = zmk_runtime_config_append_staged_combo(snapshot_context->update_id,
+                                                 &combo_context.combo);
+    if (ret != 0) {
+        snapshot_context->error = ret;
+        return false;
+    }
+
+    snapshot_context->combo_count++;
+    return true;
+}
+
 static int decode_uploaded_snapshot(uint32_t update_id,
                                     struct zmk_runtime_config_snapshot *snapshot) {
     const uint8_t *snapshot_bytes;
@@ -480,6 +542,11 @@ static int decode_uploaded_snapshot(uint32_t update_id,
         return ret;
     }
 
+    ret = zmk_runtime_config_set_staged_combos(update_id, NULL, 0U);
+    if (ret != 0) {
+        return ret;
+    }
+
     ret = zmk_runtime_config_set_staged_macro_steps(update_id, NULL, 0U);
     if (ret != 0) {
         return ret;
@@ -492,7 +559,7 @@ static int decode_uploaded_snapshot(uint32_t update_id,
     wire_snapshot.layers.arg = &context;
     wire_snapshot.runtime_objects.funcs.decode = decode_runtime_object;
     wire_snapshot.runtime_objects.arg = &context;
-    wire_snapshot.combos.funcs.decode = reject_snapshot_content;
+    wire_snapshot.combos.funcs.decode = decode_combo_definition;
     wire_snapshot.combos.arg = &context;
 
     stream = pb_istream_from_buffer(snapshot_bytes, snapshot_size);
@@ -520,6 +587,7 @@ static int decode_uploaded_snapshot(uint32_t update_id,
     snapshot->generation = wire_snapshot.generation;
     snapshot->keymap_override_count = context.keymap_override_count;
     snapshot->object_count = context.object_count;
+    snapshot->combo_count = context.combo_count;
     snapshot->macro_step_count = context.macro_step_count;
     memcpy(snapshot->capability_fingerprint, wire_snapshot.capability_fingerprint.bytes,
            sizeof(snapshot->capability_fingerprint));

@@ -11,7 +11,7 @@
 
 #include <zmk/behavior.h>
 
-#define ZMK_RUNTIME_CONFIG_PERSISTENCE_SCHEMA_VERSION 3U
+#define ZMK_RUNTIME_CONFIG_PERSISTENCE_SCHEMA_VERSION 4U
 #define ZMK_RUNTIME_CAPABILITY_FINGERPRINT_SIZE 16U
 #define ZMK_RUNTIME_OBJECT_ID_INVALID 0U
 #define ZMK_RUNTIME_DISPATCH_BEHAVIOR_NAME "runtime_object"
@@ -67,6 +67,9 @@ struct zmk_runtime_object_slot {
 struct zmk_runtime_combo_slot {
     zmk_runtime_object_id_t id;
     uint8_t key_count;
+    uint32_t timeout_ms;
+    uint32_t require_prior_idle_ms;
+    bool slow_release;
     uint16_t positions[CONFIG_ZMK_RUNTIME_MAX_COMBO_KEYS];
     struct zmk_runtime_action_ref output;
 };
@@ -110,6 +113,7 @@ struct zmk_runtime_config_pool {
         keymap_overrides[CONFIG_ZMK_RUNTIME_MAX_KEYMAP_OVERRIDES];
     uint16_t object_count;
     struct zmk_runtime_object_slot objects[CONFIG_ZMK_RUNTIME_MAX_OBJECTS];
+    uint16_t combo_count;
     struct zmk_runtime_combo_slot combos[CONFIG_ZMK_RUNTIME_MAX_COMBOS];
     uint16_t macro_step_count;
     struct zmk_runtime_macro_step macro_steps[CONFIG_ZMK_RUNTIME_MAX_MACRO_STEPS];
@@ -181,6 +185,11 @@ int zmk_runtime_config_set_staged_objects(uint32_t update_id,
                                           size_t count);
 int zmk_runtime_config_append_staged_object(uint32_t update_id,
                                             const struct zmk_runtime_object_slot *object);
+int zmk_runtime_config_set_staged_combos(uint32_t update_id,
+                                         const struct zmk_runtime_combo_slot *combos,
+                                         size_t count);
+int zmk_runtime_config_append_staged_combo(uint32_t update_id,
+                                           const struct zmk_runtime_combo_slot *combo);
 int zmk_runtime_config_set_staged_macro_steps(uint32_t update_id,
                                               const struct zmk_runtime_macro_step *steps,
                                               size_t count);
@@ -203,6 +212,8 @@ const struct zmk_behavior_binding *
 zmk_runtime_config_get_keymap_override(uint8_t layer_id, uint16_t key_position);
 const struct zmk_runtime_object_slot *
 zmk_runtime_config_get_active_object(zmk_runtime_object_id_t object_id);
+const struct zmk_runtime_combo_slot *zmk_runtime_config_get_active_combo(size_t index);
+size_t zmk_runtime_config_get_active_combo_count(void);
 int zmk_runtime_config_get_active_macro_steps(
     zmk_runtime_object_id_t object_id, const struct zmk_runtime_macro_step **steps,
     size_t *step_count);

@@ -13,6 +13,7 @@
 #include <zmk/matrix.h>
 #include <zmk/runtime_config.h>
 #include <zmk/runtime_dispatch.h>
+#include <zmk/virtual_key_position.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -40,7 +41,10 @@ struct runtime_dispatch_invocation {
     struct runtime_macro_invocation macro;
 };
 
-static struct runtime_dispatch_invocation invocations[ZMK_KEYMAP_LEN];
+#define RUNTIME_DISPATCH_INVOCATION_COUNT                                                   \
+    (ZMK_KEYMAP_LEN + ZMK_KEYMAP_SENSORS_LEN + ZMK_COMBOS_LEN + CONFIG_ZMK_RUNTIME_MAX_COMBOS)
+
+static struct runtime_dispatch_invocation invocations[RUNTIME_DISPATCH_INVOCATION_COUNT];
 
 static void macro_work_handler(struct k_work *work);
 
@@ -63,7 +67,7 @@ static int dispatch_mod_morph(const struct zmk_runtime_object_slot *object,
     const struct zmk_runtime_action_ref *selected_action;
     int ret;
 
-    if (event.position >= ZMK_KEYMAP_LEN) {
+    if (event.position >= RUNTIME_DISPATCH_INVOCATION_COUNT) {
         return -EINVAL;
     }
 
@@ -233,7 +237,7 @@ static int dispatch_macro(const struct zmk_runtime_object_slot *object,
     size_t step_count;
     int ret;
 
-    if (event.position >= ZMK_KEYMAP_LEN) {
+    if (event.position >= RUNTIME_DISPATCH_INVOCATION_COUNT) {
         return -EINVAL;
     }
 

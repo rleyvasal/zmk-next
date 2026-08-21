@@ -22,8 +22,14 @@
 #include <zmk/matrix.h>
 #include <zmk/keymap.h>
 #include <zmk/virtual_key_position.h>
+#if IS_ENABLED(CONFIG_ZMK_RUNTIME_CONFIG)
+#include <zmk/physical_layouts.h>
+#include <zmk/runtime_config.h>
+#endif
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
+
+#if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT) || IS_ENABLED(CONFIG_ZMK_RUNTIME_CONFIG)
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
@@ -43,18 +49,41 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #define COMBOS_KEYS_BYTE_ARRAY(node_id)                                                            \
     uint8_t _CONCAT(combo_prop_, node_id)[DT_PROP_LEN(node_id, key_positions)];
 
-#define MAX_COMBO_KEYS sizeof(union {DT_INST_FOREACH_CHILD(0, COMBOS_KEYS_BYTE_ARRAY)})
+#define STATIC_MAX_COMBO_KEYS sizeof(union {DT_INST_FOREACH_CHILD(0, COMBOS_KEYS_BYTE_ARRAY)})
+
+#define COMBO_ONE(n) +1
+
+#define COMPILED_COMBO_COUNT (0 DT_INST_FOREACH_CHILD(0, COMBO_ONE))
+
+#else
+
+#define STATIC_MAX_COMBO_KEYS 1U
+#define COMPILED_COMBO_COUNT 0U
+
+#endif
+
+#if IS_ENABLED(CONFIG_ZMK_RUNTIME_CONFIG)
+#define RUNTIME_MAX_COMBO_KEYS CONFIG_ZMK_RUNTIME_MAX_COMBO_KEYS
+#define RUNTIME_COMBO_CAPACITY CONFIG_ZMK_RUNTIME_MAX_COMBOS
+#else
+#define RUNTIME_MAX_COMBO_KEYS 0U
+#define RUNTIME_COMBO_CAPACITY 0U
+#endif
+
+#define MAX_COMBO_KEYS MAX(STATIC_MAX_COMBO_KEYS, RUNTIME_MAX_COMBO_KEYS)
+#define COMBO_CAPACITY (COMPILED_COMBO_COUNT + RUNTIME_COMBO_CAPACITY)
 
 struct combo_cfg {
     int32_t key_positions[MAX_COMBO_KEYS];
     int16_t key_position_len;
-    int16_t require_prior_idle_ms;
+    int32_t require_prior_idle_ms;
     int32_t timeout_ms;
     uint32_t layer_mask;
     struct zmk_behavior_binding behavior;
     // if slow release is set, the combo releases when the last key is released.
     // otherwise, the combo releases when the first key is released.
     bool slow_release;
+    bool runtime;
 };
 
 struct active_combo {
@@ -64,7 +93,13 @@ struct active_combo {
     // Once this array is empty, the behavior is released.
     uint16_t key_positions_pressed_count;
     struct zmk_position_state_changed_event key_positions_pressed[MAX_COMBO_KEYS];
+    int16_t key_position_len;
+    bool slow_release;
+    bool runtime;
+    struct zmk_behavior_binding behavior;
 };
+
+#if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
 #define PROP_BIT_AT_IDX(n, prop, idx) BIT(DT_PROP_BY_IDX(n, prop, idx))
 
@@ -97,15 +132,17 @@ struct active_combo {
 // Doing so allows our bitmasks to be "shorted key positions list first" when searching for matches.
 // `20` is chosen as a reasonable limit, since the theoretical maximum number of keys you might
 // reasonably press simultaneously with 10 fingers is 20 keys, two keys per finger.
-static const struct combo_cfg combos[] = {
+static const struct combo_cfg compiled_combos[] = {
     LISTIFY(20, COMBO_CONFIGS_WITH_MATCHING_POSITIONS_LEN, (), 0)};
+#else
+static const struct combo_cfg compiled_combos[1] = {};
+#endif
 
-#define COMBO_ONE(n) +1
-
-#define COMBO_CHILDREN_COUNT (0 DT_INST_FOREACH_CHILD(0, COMBO_ONE))
+static struct combo_cfg combos[COMBO_CAPACITY];
+static size_t combo_count;
 
 // We need at least 4 bytes to avoid alignment issues
-#define BYTES_FOR_COMBOS_MASK DIV_ROUND_UP(COMBO_CHILDREN_COUNT, 32)
+#define BYTES_FOR_COMBOS_MASK DIV_ROUND_UP(COMBO_CAPACITY, 32)
 
 uint8_t pressed_keys_count = 0;
 // set of keys pressed
@@ -147,6 +184,95 @@ static int initialize_combo(size_t index) {
     return 0;
 }
 
+static void clear_combo_lookup(size_t index) {
+    for (size_t position = 0; position < ZMK_KEYMAP_LEN; position++) {
+        sys_bitfield_clear_bit((mem_addr_t)&combo_lookup[position], index);
+    }
+}
+
+#if IS_ENABLED(CONFIG_ZMK_RUNTIME_CONFIG)
+void zmk_combo_runtime_config_refresh(void) {
+    const uint32_t *selected_to_stock;
+    size_t runtime_combo_count;
+    int ret;
+
+    for (size_t index = 0U; index < COMBO_CAPACITY; index++) {
+        clear_combo_lookup(index);
+    }
+
+    combo_count = COMPILED_COMBO_COUNT;
+    memcpy(combos, compiled_combos, COMPILED_COMBO_COUNT * sizeof(combos[0]));
+    memset(candidates, 0, sizeof(candidates));
+    fully_pressed_combo = INT16_MAX;
+
+    ret = zmk_physical_layouts_get_selected_to_stock_position_map(&selected_to_stock);
+    if (ret != ZMK_KEYMAP_LEN) {
+        LOG_ERR("Unable to rebuild runtime combo positions (%d)", ret);
+        return;
+    }
+
+    runtime_combo_count = zmk_runtime_config_get_active_combo_count();
+    for (size_t runtime_index = 0; runtime_index < runtime_combo_count; runtime_index++) {
+        const struct zmk_runtime_combo_slot *source =
+            zmk_runtime_config_get_active_combo(runtime_index);
+        struct combo_cfg destination = {.runtime = true};
+        bool valid = source != NULL;
+
+        if (!source || combo_count >= COMBO_CAPACITY ||
+            zmk_runtime_config_action_ref_to_binding(&source->output, &destination.behavior) != 0) {
+            LOG_ERR("Unable to activate runtime combo %u", source ? source->id : 0U);
+            continue;
+        }
+
+        destination.key_position_len = source->key_count;
+        destination.timeout_ms = (int32_t)source->timeout_ms;
+        destination.require_prior_idle_ms = (int32_t)source->require_prior_idle_ms;
+        destination.slow_release = source->slow_release;
+        for (size_t key_index = 0; key_index < source->key_count; key_index++) {
+            bool found = false;
+
+            for (size_t selected_position = 0; selected_position < ZMK_KEYMAP_LEN;
+                 selected_position++) {
+                if (selected_to_stock[selected_position] == source->positions[key_index]) {
+                    destination.key_positions[key_index] = selected_position;
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found) {
+                valid = false;
+                break;
+            }
+        }
+
+        if (!valid) {
+            LOG_ERR("Unable to map runtime combo %u to the selected layout", source->id);
+            continue;
+        }
+
+        size_t insert_index = combo_count;
+
+        /* The normal combo resolver expects shorter combos first. Preserve the
+         * compiled order for equal lengths, then append runtime combos in
+         * snapshot order. */
+        while (insert_index > 0U &&
+               combos[insert_index - 1U].key_position_len > destination.key_position_len) {
+            combos[insert_index] = combos[insert_index - 1U];
+            insert_index--;
+        }
+        combos[insert_index] = destination;
+        combo_count++;
+    }
+
+    for (size_t index = 0U; index < combo_count; index++) {
+        initialize_combo(index);
+    }
+}
+#else
+void zmk_combo_runtime_config_refresh(void) {}
+#endif
+
 static bool combo_active_on_layer(const struct combo_cfg *combo, uint8_t layer) {
     if (!combo->layer_mask) {
         return true;
@@ -163,7 +289,7 @@ static int setup_candidates_for_first_keypress(int32_t position, int64_t timesta
     int number_of_combo_candidates = 0;
     uint8_t highest_active_layer = zmk_keymap_highest_layer_active();
 
-    for (size_t i = 0; i < ARRAY_SIZE(combos); i++) {
+    for (size_t i = 0; i < combo_count; i++) {
         if (sys_bitfield_test_bit((mem_addr_t)&combo_lookup[position], i)) {
             const struct combo_cfg *combo = &combos[i];
             if (combo_active_on_layer(combo, highest_active_layer) &&
@@ -207,7 +333,7 @@ static int64_t first_candidate_timeout() {
     }
 
     int64_t first_timeout = LONG_MAX;
-    for (int i = 0; i < ARRAY_SIZE(combos); i++) {
+    for (size_t i = 0; i < combo_count; i++) {
         if (sys_bitfield_test_bit((mem_addr_t)&candidates, i)) {
             first_timeout = MIN(first_timeout, combos[i].timeout_ms);
         }
@@ -231,7 +357,7 @@ static int filter_timed_out_candidates(int64_t timestamp) {
     __ASSERT(pressed_keys_count > 0, "Searching for a candidate timeout with no keys pressed");
 
     int remaining_candidates = 0;
-    for (int i = 0; i < ARRAY_SIZE(combos); i++) {
+    for (size_t i = 0; i < combo_count; i++) {
         if (sys_bitfield_test_bit((mem_addr_t)&candidates, i)) {
 
             if (pressed_keys[0].data.timestamp + combos[i].timeout_ms > timestamp) {
@@ -278,7 +404,7 @@ static int release_pressed_keys() {
     return count;
 }
 
-static inline int press_combo_behavior(int combo_idx, const struct combo_cfg *combo,
+static inline int press_combo_behavior(int combo_idx, const struct zmk_behavior_binding *binding,
                                        int32_t timestamp) {
     struct zmk_behavior_binding_event event = {
         .position = ZMK_VIRTUAL_KEY_POSITION_COMBO(combo_idx),
@@ -290,10 +416,10 @@ static inline int press_combo_behavior(int combo_idx, const struct combo_cfg *co
 
     last_combo_timestamp = timestamp;
 
-    return zmk_behavior_invoke_binding(&combo->behavior, event, true);
+    return zmk_behavior_invoke_binding(binding, event, true);
 }
 
-static inline int release_combo_behavior(int combo_idx, const struct combo_cfg *combo,
+static inline int release_combo_behavior(int combo_idx, const struct zmk_behavior_binding *binding,
                                          int32_t timestamp) {
     struct zmk_behavior_binding_event event = {
         .position = ZMK_VIRTUAL_KEY_POSITION_COMBO(combo_idx),
@@ -303,12 +429,12 @@ static inline int release_combo_behavior(int combo_idx, const struct combo_cfg *
 #endif
     };
 
-    return zmk_behavior_invoke_binding(&combo->behavior, event, false);
+    return zmk_behavior_invoke_binding(binding, event, false);
 }
 
 static void move_pressed_keys_to_active_combo(struct active_combo *active_combo) {
 
-    int combo_length = MIN(pressed_keys_count, combos[active_combo->combo_idx].key_position_len);
+    int combo_length = MIN(pressed_keys_count, active_combo->key_position_len);
     for (int i = 0; i < combo_length; i++) {
         active_combo->key_positions_pressed[i] = pressed_keys[i];
     }
@@ -336,15 +462,49 @@ static struct active_combo *store_active_combo(int32_t combo_idx) {
     return NULL;
 }
 
+static void deactivate_combo(int active_combo_index);
+
+static int acquire_runtime_combo_blocker(const struct combo_cfg *combo) {
+#if IS_ENABLED(CONFIG_ZMK_RUNTIME_CONFIG)
+    return combo->runtime ? zmk_runtime_config_activation_blocker_acquire() : 0;
+#else
+    ARG_UNUSED(combo);
+    return 0;
+#endif
+}
+
+static void release_runtime_combo_blocker(const struct active_combo *combo) {
+#if IS_ENABLED(CONFIG_ZMK_RUNTIME_CONFIG)
+    if (combo->runtime) {
+        (void)zmk_runtime_config_activation_blocker_release();
+    }
+#else
+    ARG_UNUSED(combo);
+#endif
+}
+
 static void activate_combo(int combo_idx) {
+    const struct combo_cfg *combo = &combos[combo_idx];
     struct active_combo *active_combo = store_active_combo(combo_idx);
+
     if (active_combo == NULL) {
         // unable to store combo
         release_pressed_keys();
         return;
     }
+
+    if (acquire_runtime_combo_blocker(combo) != 0) {
+        deactivate_combo(active_combo - active_combos);
+        release_pressed_keys();
+        return;
+    }
+
+    active_combo->key_position_len = combo->key_position_len;
+    active_combo->slow_release = combo->slow_release;
+    active_combo->runtime = combo->runtime;
+    active_combo->behavior = combo->behavior;
     move_pressed_keys_to_active_combo(active_combo);
-    press_combo_behavior(combo_idx, &combos[combo_idx],
+    press_combo_behavior(combo_idx, &active_combo->behavior,
                          active_combo->key_positions_pressed[0].data.timestamp);
 }
 
@@ -364,8 +524,8 @@ static bool release_combo_key(int32_t position, int64_t timestamp) {
         struct active_combo *active_combo = &active_combos[combo_idx];
 
         bool key_released = false;
-        bool all_keys_pressed = active_combo->key_positions_pressed_count ==
-                                combos[active_combo->combo_idx].key_position_len;
+        bool all_keys_pressed =
+            active_combo->key_positions_pressed_count == active_combo->key_position_len;
         bool all_keys_released = true;
         for (int i = 0; i < active_combo->key_positions_pressed_count; i++) {
             if (key_released) {
@@ -380,11 +540,12 @@ static bool release_combo_key(int32_t position, int64_t timestamp) {
 
         if (key_released) {
             active_combo->key_positions_pressed_count--;
-            const struct combo_cfg *c = &combos[active_combo->combo_idx];
-            if ((c->slow_release && all_keys_released) || (!c->slow_release && all_keys_pressed)) {
-                release_combo_behavior(active_combo->combo_idx, c, timestamp);
+            if ((active_combo->slow_release && all_keys_released) ||
+                (!active_combo->slow_release && all_keys_pressed)) {
+                release_combo_behavior(active_combo->combo_idx, &active_combo->behavior, timestamp);
             }
             if (all_keys_released) {
+                release_runtime_combo_blocker(active_combo);
                 deactivate_combo(combo_idx);
             }
             return true;
@@ -435,7 +596,7 @@ static int position_state_down(const zmk_event_t *ev, struct zmk_position_state_
     update_timeout_task();
 
     if (num_candidates) {
-        for (int i = 0; i < ARRAY_SIZE(combos); i++) {
+        for (size_t i = 0; i < combo_count; i++) {
             if (sys_bitfield_test_bit((mem_addr_t)&candidates, i)) {
                 const struct combo_cfg *candidate_combo = &combos[i];
                 if (candidate_is_completely_pressed(candidate_combo)) {
@@ -526,10 +687,16 @@ static int combo_init(void) {
     }
 
     k_work_init_delayable(&timeout_task, combo_timeout_handler);
-    LOG_WRN("Have %d combos!", ARRAY_SIZE(combos));
-    for (int i = 0; i < ARRAY_SIZE(combos); i++) {
+    LOG_WRN("Have %u compiled combos", (unsigned int)COMPILED_COMBO_COUNT);
+#if IS_ENABLED(CONFIG_ZMK_RUNTIME_CONFIG)
+    zmk_combo_runtime_config_refresh();
+#else
+    combo_count = COMPILED_COMBO_COUNT;
+    memcpy(combos, compiled_combos, COMPILED_COMBO_COUNT * sizeof(combos[0]));
+    for (size_t i = 0; i < combo_count; i++) {
         initialize_combo(i);
     }
+#endif
     return 0;
 }
 

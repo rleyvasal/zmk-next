@@ -125,7 +125,18 @@ a binding held. Each running macro holds an activation blocker until it
 finishes, including while waiting or paused. Mod-morph and macro child actions
 are compiled bindings in this increment; runtime-object nesting is rejected
 until the object graph has a complete recursion and lifetime model. Layer
-metadata, combos, hold-taps, and tap-dances remain unsupported.
+metadata, hold-taps, and tap-dances remain unsupported.
+
+Runtime combos use a fixed pool and accept a canonical list of stock logical
+key positions, a timeout, optional slow-release and require-prior-idle
+settings, and one ActionRef output. The active physical-layout mapping rebuilds
+the runtime combo index whenever a generation activates or the selected layout
+changes. This preserves saved combo positions across UI layout choices. A
+runtime combo is additive to compiled Devicetree defaults in this increment;
+replacing or deleting a compiled default requires explicit baseline-management
+protocol support. A captured runtime combo retains an activation blocker until
+its final source-key release, so its saved output binding remains valid while
+the combo completes.
 
 ## Runtime-editable scope
 

@@ -14,3 +14,7 @@
     COND_CODE_1(DT_HAS_COMPAT_STATUS_OKAY(zmk_combos),                                             \
                 (0 DT_FOREACH_CHILD_STATUS_OKAY(DT_INST(0, zmk_combos), ZMK_COMBOS_UTIL_ONE)),     \
                 (0))
+
+/* Rebuilds the runtime-combo portion of the combo lookup table after a
+ * Runtime Config generation becomes active. */
+void zmk_combo_runtime_config_refresh(void);

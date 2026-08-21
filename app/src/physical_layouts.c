@@ -22,6 +22,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/matrix.h>
 #include <zmk/physical_layouts.h>
 #if IS_ENABLED(CONFIG_ZMK_RUNTIME_CONFIG)
+#include <zmk/combos.h>
 #include <zmk/runtime_config.h>
 #endif
 #include <zmk/event_manager.h>
@@ -367,6 +368,9 @@ int zmk_physical_layouts_select_layout(const struct zmk_physical_layout *dest_la
     }
 
     active = dest_layout;
+#if IS_ENABLED(CONFIG_ZMK_RUNTIME_CONFIG)
+    zmk_combo_runtime_config_refresh();
+#endif
 
     if (active->kscan) {
 #if IS_ENABLED(CONFIG_PM_DEVICE_RUNTIME)
