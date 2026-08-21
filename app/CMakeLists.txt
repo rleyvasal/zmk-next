@@ -113,6 +113,10 @@ add_subdirectory(src/display/)
 add_subdirectory_ifdef(CONFIG_SETTINGS src/settings/)
 
 if (CONFIG_ZMK_STUDIO_RPC)
+  if (NOT DEFINED ZEPHYR_ZMK_NEXT_MESSAGES_MODULE_DIR)
+    message(FATAL_ERROR "ZMK Next Studio RPC requires the zmk-next-messages module")
+  endif()
+
   # For some reason this is failing if run from a different sub-file.
   list(APPEND CMAKE_MODULE_PATH ${ZEPHYR_BASE}/modules/nanopb)
 
@@ -121,12 +125,13 @@ if (CONFIG_ZMK_STUDIO_RPC)
     # Turn off the default nanopb behavior
   set(NANOPB_GENERATE_CPP_STANDALONE OFF)
 
-  nanopb_generate_cpp(proto_srcs proto_hdrs RELPATH ${ZEPHYR_ZMK_STUDIO_MESSAGES_MODULE_DIR}
-                        ${ZEPHYR_ZMK_STUDIO_MESSAGES_MODULE_DIR}/proto/zmk/studio.proto
-                        ${ZEPHYR_ZMK_STUDIO_MESSAGES_MODULE_DIR}/proto/zmk/meta.proto
-                        ${ZEPHYR_ZMK_STUDIO_MESSAGES_MODULE_DIR}/proto/zmk/core.proto
-                        ${ZEPHYR_ZMK_STUDIO_MESSAGES_MODULE_DIR}/proto/zmk/behaviors.proto
-                        ${ZEPHYR_ZMK_STUDIO_MESSAGES_MODULE_DIR}/proto/zmk/keymap.proto
+  nanopb_generate_cpp(proto_srcs proto_hdrs RELPATH ${ZEPHYR_ZMK_NEXT_MESSAGES_MODULE_DIR}
+                        ${ZEPHYR_ZMK_NEXT_MESSAGES_MODULE_DIR}/proto/zmk/studio.proto
+                        ${ZEPHYR_ZMK_NEXT_MESSAGES_MODULE_DIR}/proto/zmk/meta.proto
+                        ${ZEPHYR_ZMK_NEXT_MESSAGES_MODULE_DIR}/proto/zmk/core.proto
+                        ${ZEPHYR_ZMK_NEXT_MESSAGES_MODULE_DIR}/proto/zmk/behaviors.proto
+                        ${ZEPHYR_ZMK_NEXT_MESSAGES_MODULE_DIR}/proto/zmk/keymap.proto
+                        ${ZEPHYR_ZMK_NEXT_MESSAGES_MODULE_DIR}/proto/zmk/runtime_config.proto
   )
 
   target_include_directories(app PUBLIC ${CMAKE_CURRENT_BINARY_DIR})

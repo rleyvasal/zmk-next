@@ -66,6 +66,13 @@ static zmk_studio_Response handle_request(const zmk_studio_Request *req) {
     zmk_studio_Response resp = sub->func(sub, req);
     resp.type.request_response.request_id = req->request_id;
 
+    if (req->which_subsystem == zmk_studio_Request_runtime_config_tag &&
+        resp.type.request_response.which_subsystem ==
+            zmk_studio_RequestResponse_runtime_config_tag) {
+        resp.type.request_response.subsystem.runtime_config.request_id =
+            req->subsystem.runtime_config.request_id;
+    }
+
     return resp;
 }
 

@@ -48,4 +48,12 @@ config ZMK_RUNTIME_MAX_PERSISTED_BYTES
       Maximum serialized runtime configuration size. The on-flash format is
       private to the firmware and is not implemented in this phase.
 
+config ZMK_RUNTIME_CONFIG_RPC
+    bool "Expose runtime configuration through Studio RPC"
+    depends on ZMK_STUDIO_RPC
+    default y
+    help
+      Expose the ZMK Next Runtime Config subsystem through the existing Studio
+      USB serial and BLE transports. Phase 0 exposes capabilities only.
+
 endif
