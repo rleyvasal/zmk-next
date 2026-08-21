@@ -14,6 +14,7 @@
 
 #include <zmk/runtime_config.h>
 #include <zmk/keymap.h>
+#include <zmk/physical_layouts.h>
 #include <zmk/studio/rpc.h>
 
 LOG_MODULE_DECLARE(zmk_studio, CONFIG_ZMK_STUDIO_LOG_LEVEL);
@@ -109,8 +110,31 @@ static bool encode_runtime_object_types(pb_ostream_t *stream, const pb_field_t *
     return true;
 }
 
+static bool encode_selected_to_stock_positions(pb_ostream_t *stream, const pb_field_t *field,
+                                               void *const *arg) {
+    const uint32_t *map = NULL;
+    int count;
+
+    ARG_UNUSED(arg);
+
+    count = zmk_physical_layouts_get_selected_to_stock_position_map(&map);
+    if (count < 0 || !map) {
+        return false;
+    }
+
+    for (int i = 0; i < count; i++) {
+        if (!pb_encode_tag_for_field(stream, field) || !pb_encode_varint(stream, map[i])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 zmk_studio_Response get_runtime_capabilities(const zmk_studio_Request *req) {
     struct zmk_runtime_capabilities capabilities;
+    const uint32_t *selected_to_stock = NULL;
+    int selected_position_count;
     zmk_runtime_config_RuntimeCapabilities response =
         zmk_runtime_config_RuntimeCapabilities_init_zero;
 
@@ -134,6 +158,12 @@ zmk_studio_Response get_runtime_capabilities(const zmk_studio_Request *req) {
     response.limits.max_keymap_overrides = capabilities.max_keymap_overrides;
     response.supported_features.funcs.encode = encode_runtime_features;
     response.supported_object_types.funcs.encode = encode_runtime_object_types;
+    selected_position_count =
+        zmk_physical_layouts_get_selected_to_stock_position_map(&selected_to_stock);
+    if (selected_position_count > 0 && selected_to_stock) {
+        response.selected_position_count = selected_position_count;
+        response.selected_to_stock_positions.funcs.encode = encode_selected_to_stock_positions;
+    }
 
     return RUNTIME_CONFIG_RESPONSE(get_runtime_capabilities, response);
 }
@@ -148,6 +178,295 @@ static void populate_status(zmk_runtime_config_RuntimeConfigStatus *status) {
             : zmk_runtime_config_RuntimeConfigState_RUNTIME_CONFIG_STATE_ACTIVE;
     status->active_generation = activation.active_generation;
     status->pending_generation = activation.pending_generation;
+}
+
+static bool action_ref_to_wire(const struct zmk_runtime_action_ref *action,
+                               zmk_runtime_config_ActionReference *wire_action) {
+    if (!action || !wire_action) {
+        return false;
+    }
+
+    *wire_action = (zmk_runtime_config_ActionReference)zmk_runtime_config_ActionReference_init_zero;
+    switch (action->kind) {
+    case ZMK_RUNTIME_ACTION_COMPILED_BEHAVIOR:
+        if (action->data.compiled.local_id == 0U) {
+            return false;
+        }
+
+        wire_action->which_target =
+            zmk_runtime_config_ActionReference_compiled_behavior_tag;
+        wire_action->target.compiled_behavior.behavior_id = action->data.compiled.local_id;
+        wire_action->target.compiled_behavior.param1 = action->data.compiled.param1;
+        wire_action->target.compiled_behavior.param2 = action->data.compiled.param2;
+        return true;
+    case ZMK_RUNTIME_ACTION_OBJECT:
+        if (action->data.object_id == ZMK_RUNTIME_OBJECT_ID_INVALID) {
+            return false;
+        }
+
+        wire_action->which_target = zmk_runtime_config_ActionReference_runtime_object_id_tag;
+        wire_action->target.runtime_object_id = action->data.object_id;
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool encode_keymap_overrides(pb_ostream_t *stream, const pb_field_t *field,
+                                    void *const *arg) {
+    size_t count = zmk_runtime_config_get_active_keymap_override_count();
+
+    ARG_UNUSED(arg);
+
+    for (size_t i = 0; i < count; i++) {
+        const struct zmk_runtime_keymap_override *override =
+            zmk_runtime_config_get_active_keymap_override(i);
+        zmk_runtime_config_KeymapOverride wire_override =
+            zmk_runtime_config_KeymapOverride_init_zero;
+
+        if (!override || !action_ref_to_wire(&override->action, &wire_override.action)) {
+            return false;
+        }
+
+        wire_override.layer_id = override->layer_id;
+        wire_override.key_position = override->key_position;
+        wire_override.has_action = true;
+        if (!pb_encode_tag_for_field(stream, field) ||
+            !pb_encode_submessage(stream, &zmk_runtime_config_KeymapOverride_msg, &wire_override)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool encode_macro_steps(pb_ostream_t *stream, const pb_field_t *field, void *const *arg) {
+    const struct zmk_runtime_object_slot *object = *arg;
+    const struct zmk_runtime_macro_step *steps;
+    size_t count;
+
+    if (!object || zmk_runtime_config_get_active_macro_steps(object->id, &steps, &count) != 0) {
+        return false;
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        zmk_runtime_config_MacroStep wire_step = zmk_runtime_config_MacroStep_init_zero;
+
+        switch (steps[i].type) {
+        case ZMK_RUNTIME_MACRO_STEP_TAP:
+            wire_step.which_instruction = zmk_runtime_config_MacroStep_tap_tag;
+            if (!action_ref_to_wire(&steps[i].data.action, &wire_step.instruction.tap)) {
+                return false;
+            }
+            break;
+        case ZMK_RUNTIME_MACRO_STEP_PRESS:
+            wire_step.which_instruction = zmk_runtime_config_MacroStep_press_tag;
+            if (!action_ref_to_wire(&steps[i].data.action, &wire_step.instruction.press)) {
+                return false;
+            }
+            break;
+        case ZMK_RUNTIME_MACRO_STEP_RELEASE:
+            wire_step.which_instruction = zmk_runtime_config_MacroStep_release_tag;
+            if (!action_ref_to_wire(&steps[i].data.action, &wire_step.instruction.release)) {
+                return false;
+            }
+            break;
+        case ZMK_RUNTIME_MACRO_STEP_WAIT:
+            wire_step.which_instruction = zmk_runtime_config_MacroStep_wait_ms_tag;
+            wire_step.instruction.wait_ms = steps[i].data.duration_ms;
+            break;
+        case ZMK_RUNTIME_MACRO_STEP_PAUSE_UNTIL_RELEASE:
+            wire_step.which_instruction = zmk_runtime_config_MacroStep_pause_until_release_tag;
+            wire_step.instruction.pause_until_release = true;
+            break;
+        default:
+            return false;
+        }
+
+        if (!pb_encode_tag_for_field(stream, field) ||
+            !pb_encode_submessage(stream, &zmk_runtime_config_MacroStep_msg, &wire_step)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool encode_tap_dance_actions(pb_ostream_t *stream, const pb_field_t *field,
+                                     void *const *arg) {
+    const struct zmk_runtime_object_slot *object = *arg;
+    const struct zmk_runtime_tap_dance_action *actions;
+    uint32_t tapping_term_ms;
+    size_t count;
+
+    if (!object ||
+        zmk_runtime_config_get_active_tap_dance_actions(object->id, &actions, &count,
+                                                        &tapping_term_ms) != 0 ||
+        tapping_term_ms != object->data.tap_dance.tapping_term_ms) {
+        return false;
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        zmk_runtime_config_TapDanceAction wire_action =
+            zmk_runtime_config_TapDanceAction_init_zero;
+
+        if (!action_ref_to_wire(&actions[i].tap_action, &wire_action.tap_action) ||
+            !action_ref_to_wire(&actions[i].hold_action, &wire_action.hold_action)) {
+            return false;
+        }
+
+        wire_action.tap_count = i + 1U;
+        wire_action.has_tap_action = true;
+        wire_action.has_hold_action = true;
+        if (!pb_encode_tag_for_field(stream, field) ||
+            !pb_encode_submessage(stream, &zmk_runtime_config_TapDanceAction_msg, &wire_action)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool encode_runtime_objects(pb_ostream_t *stream, const pb_field_t *field,
+                                   void *const *arg) {
+    size_t count = zmk_runtime_config_get_active_object_count();
+
+    ARG_UNUSED(arg);
+
+    for (size_t i = 0; i < count; i++) {
+        const struct zmk_runtime_object_slot *object = zmk_runtime_config_get_active_object_at(i);
+        zmk_runtime_config_RuntimeObject wire_object =
+            zmk_runtime_config_RuntimeObject_init_zero;
+
+        if (!object || object->id == ZMK_RUNTIME_OBJECT_ID_INVALID) {
+            return false;
+        }
+
+        wire_object.id = object->id;
+        switch (object->type) {
+        case ZMK_RUNTIME_OBJECT_TYPE_MOD_MORPH:
+            wire_object.which_definition = zmk_runtime_config_RuntimeObject_mod_morph_tag;
+            wire_object.definition.mod_morph.modifiers = object->data.mod_morph.modifiers;
+            wire_object.definition.mod_morph.has_normal_action = true;
+            wire_object.definition.mod_morph.has_morphed_action = true;
+            if (!action_ref_to_wire(&object->data.mod_morph.normal_action,
+                                    &wire_object.definition.mod_morph.normal_action) ||
+                !action_ref_to_wire(&object->data.mod_morph.morphed_action,
+                                    &wire_object.definition.mod_morph.morphed_action)) {
+                return false;
+            }
+            break;
+        case ZMK_RUNTIME_OBJECT_TYPE_MACRO:
+            wire_object.which_definition = zmk_runtime_config_RuntimeObject_macro_tag;
+            wire_object.definition.macro.steps.funcs.encode = encode_macro_steps;
+            wire_object.definition.macro.steps.arg = (void *)object;
+            break;
+        case ZMK_RUNTIME_OBJECT_TYPE_HOLD_TAP:
+            wire_object.which_definition = zmk_runtime_config_RuntimeObject_hold_tap_tag;
+            wire_object.definition.hold_tap.flavor = object->data.hold_tap.flavor;
+            wire_object.definition.hold_tap.tapping_term_ms = object->data.hold_tap.tapping_term_ms;
+            wire_object.definition.hold_tap.quick_tap_ms = object->data.hold_tap.quick_tap_ms;
+            wire_object.definition.hold_tap.require_prior_idle_ms =
+                object->data.hold_tap.require_prior_idle_ms;
+            wire_object.definition.hold_tap.has_tap_action = true;
+            wire_object.definition.hold_tap.has_hold_action = true;
+            if (!action_ref_to_wire(&object->data.hold_tap.tap_action,
+                                    &wire_object.definition.hold_tap.tap_action) ||
+                !action_ref_to_wire(&object->data.hold_tap.hold_action,
+                                    &wire_object.definition.hold_tap.hold_action)) {
+                return false;
+            }
+            break;
+        case ZMK_RUNTIME_OBJECT_TYPE_TAP_DANCE:
+            wire_object.which_definition = zmk_runtime_config_RuntimeObject_tap_dance_tag;
+            wire_object.definition.tap_dance.tapping_term_ms =
+                object->data.tap_dance.tapping_term_ms;
+            wire_object.definition.tap_dance.actions.funcs.encode = encode_tap_dance_actions;
+            wire_object.definition.tap_dance.actions.arg = (void *)object;
+            break;
+        default:
+            return false;
+        }
+
+        if (!pb_encode_tag_for_field(stream, field) ||
+            !pb_encode_submessage(stream, &zmk_runtime_config_RuntimeObject_msg, &wire_object)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool encode_combo_positions(pb_ostream_t *stream, const pb_field_t *field,
+                                   void *const *arg) {
+    const struct zmk_runtime_combo_slot *combo = *arg;
+
+    if (!combo || combo->key_count == 0U ||
+        combo->key_count > CONFIG_ZMK_RUNTIME_MAX_COMBO_KEYS) {
+        return false;
+    }
+
+    for (size_t i = 0; i < combo->key_count; i++) {
+        if (!pb_encode_tag_for_field(stream, field) ||
+            !pb_encode_varint(stream, combo->positions[i])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool encode_combos(pb_ostream_t *stream, const pb_field_t *field, void *const *arg) {
+    size_t count = zmk_runtime_config_get_active_combo_count();
+
+    ARG_UNUSED(arg);
+
+    for (size_t i = 0; i < count; i++) {
+        const struct zmk_runtime_combo_slot *combo = zmk_runtime_config_get_active_combo(i);
+        zmk_runtime_config_ComboDefinition wire_combo =
+            zmk_runtime_config_ComboDefinition_init_zero;
+
+        if (!combo || !action_ref_to_wire(&combo->output, &wire_combo.output)) {
+            return false;
+        }
+
+        wire_combo.id = combo->id;
+        wire_combo.timeout_ms = combo->timeout_ms;
+        wire_combo.slow_release = combo->slow_release;
+        wire_combo.require_prior_idle_ms = combo->require_prior_idle_ms;
+        wire_combo.has_output = true;
+        wire_combo.key_positions.funcs.encode = encode_combo_positions;
+        wire_combo.key_positions.arg = (void *)combo;
+        if (!pb_encode_tag_for_field(stream, field) ||
+            !pb_encode_submessage(stream, &zmk_runtime_config_ComboDefinition_msg, &wire_combo)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+zmk_studio_Response get_runtime_config(const zmk_studio_Request *req) {
+    zmk_runtime_config_GetRuntimeConfigResponse response =
+        zmk_runtime_config_GetRuntimeConfigResponse_init_zero;
+    struct zmk_runtime_config_snapshot snapshot;
+
+    ARG_UNUSED(req);
+
+    zmk_runtime_config_get_active_snapshot(&snapshot);
+    response.has_snapshot = true;
+    response.snapshot.persistence_schema_version = snapshot.persistence_schema_version;
+    response.snapshot.generation = snapshot.generation;
+    response.snapshot.capability_fingerprint.size = sizeof(snapshot.capability_fingerprint);
+    memcpy(response.snapshot.capability_fingerprint.bytes, snapshot.capability_fingerprint,
+           sizeof(snapshot.capability_fingerprint));
+    response.snapshot.keymap_overrides.funcs.encode = encode_keymap_overrides;
+    response.snapshot.runtime_objects.funcs.encode = encode_runtime_objects;
+    response.snapshot.combos.funcs.encode = encode_combos;
+    response.has_status = true;
+    populate_status(&response.status);
+
+    return RUNTIME_CONFIG_RESPONSE(get_runtime_config, response);
 }
 
 zmk_studio_Response get_runtime_config_status(const zmk_studio_Request *req) {
@@ -812,13 +1131,47 @@ zmk_studio_Response abort_runtime_update(const zmk_studio_Request *req) {
     return RUNTIME_CONFIG_RESPONSE(abort_runtime_update, response);
 }
 
+zmk_studio_Response reset_runtime_config(const zmk_studio_Request *req) {
+    const zmk_runtime_config_ResetRuntimeConfigRequest *request =
+        &req->subsystem.runtime_config.request_type.reset_runtime_config;
+    zmk_runtime_config_CommitRuntimeUpdateResult response =
+        zmk_runtime_config_CommitRuntimeUpdateResult_init_zero;
+    uint32_t update_id = 0U;
+    int ret = zmk_runtime_config_stage_stock_update(request->expected_active_generation, &update_id);
+
+    if (ret == 0) {
+        ret = zmk_runtime_config_persist_update(update_id, &response.generation);
+    }
+    if (ret != 0) {
+        if (update_id != 0U) {
+            (void)zmk_runtime_config_abort_update(update_id);
+        }
+        zmk_studio_Response studio_response =
+            RUNTIME_CONFIG_RESPONSE(reset_runtime_config, response);
+
+        set_error(&studio_response, error_from_errno(ret));
+        return studio_response;
+    }
+
+    response.saved = true;
+    response.has_status = true;
+    populate_status(&response.status);
+    response.activation =
+        response.status.pending_generation != 0U
+            ? zmk_runtime_config_RuntimeConfigActivation_RUNTIME_CONFIG_ACTIVATION_PENDING_IDLE
+            : zmk_runtime_config_RuntimeConfigActivation_RUNTIME_CONFIG_ACTIVATION_ACTIVE;
+    return RUNTIME_CONFIG_RESPONSE(reset_runtime_config, response);
+}
+
 ZMK_RPC_SUBSYSTEM_HANDLER(runtime_config, get_runtime_capabilities,
                           ZMK_STUDIO_RPC_HANDLER_UNSECURED);
 ZMK_RPC_SUBSYSTEM_HANDLER(runtime_config, get_runtime_config_status,
                           ZMK_STUDIO_RPC_HANDLER_UNSECURED);
+ZMK_RPC_SUBSYSTEM_HANDLER(runtime_config, get_runtime_config, ZMK_STUDIO_RPC_HANDLER_UNSECURED);
 ZMK_RPC_SUBSYSTEM_HANDLER(runtime_config, begin_runtime_update, ZMK_STUDIO_RPC_HANDLER_SECURED);
 ZMK_RPC_SUBSYSTEM_HANDLER(runtime_config, upload_runtime_update_chunk,
                           ZMK_STUDIO_RPC_HANDLER_SECURED);
 ZMK_RPC_SUBSYSTEM_HANDLER(runtime_config, validate_runtime_update, ZMK_STUDIO_RPC_HANDLER_SECURED);
 ZMK_RPC_SUBSYSTEM_HANDLER(runtime_config, commit_runtime_update, ZMK_STUDIO_RPC_HANDLER_SECURED);
 ZMK_RPC_SUBSYSTEM_HANDLER(runtime_config, abort_runtime_update, ZMK_STUDIO_RPC_HANDLER_SECURED);
+ZMK_RPC_SUBSYSTEM_HANDLER(runtime_config, reset_runtime_config, ZMK_STUDIO_RPC_HANDLER_SECURED);

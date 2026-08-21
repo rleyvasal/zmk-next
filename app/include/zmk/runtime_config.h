@@ -207,6 +207,8 @@ const struct zmk_runtime_config_snapshot *zmk_runtime_config_staged_snapshot(voi
 
 int zmk_runtime_config_begin_update(uint32_t expected_active_generation, size_t snapshot_size,
                                     uint32_t *update_id);
+/* Stage an empty overlay so the existing transactional persistence path can restore stock defaults. */
+int zmk_runtime_config_stage_stock_update(uint32_t expected_active_generation, uint32_t *update_id);
 int zmk_runtime_config_upload_update_chunk(uint32_t update_id, size_t offset, const uint8_t *chunk,
                                            size_t chunk_size, size_t *accepted_bytes,
                                            size_t *next_offset);
@@ -251,8 +253,14 @@ int zmk_runtime_config_prepare_persisted_generation(const uint8_t *snapshot_byte
 int zmk_runtime_config_activate_pending_generation(uint32_t generation);
 const struct zmk_behavior_binding *
 zmk_runtime_config_get_keymap_override(uint8_t layer_id, uint16_t key_position);
+void zmk_runtime_config_get_active_snapshot(struct zmk_runtime_config_snapshot *snapshot);
+const struct zmk_runtime_keymap_override *
+zmk_runtime_config_get_active_keymap_override(size_t index);
+size_t zmk_runtime_config_get_active_keymap_override_count(void);
 const struct zmk_runtime_object_slot *
 zmk_runtime_config_get_active_object(zmk_runtime_object_id_t object_id);
+const struct zmk_runtime_object_slot *zmk_runtime_config_get_active_object_at(size_t index);
+size_t zmk_runtime_config_get_active_object_count(void);
 const struct zmk_runtime_combo_slot *zmk_runtime_config_get_active_combo(size_t index);
 size_t zmk_runtime_config_get_active_combo_count(void);
 int zmk_runtime_config_get_active_macro_steps(

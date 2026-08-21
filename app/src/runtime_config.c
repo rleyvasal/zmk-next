@@ -633,6 +633,36 @@ int zmk_runtime_config_begin_update(uint32_t expected_active_generation, size_t 
     return 0;
 }
 
+int zmk_runtime_config_stage_stock_update(uint32_t expected_active_generation, uint32_t *update_id) {
+    struct zmk_runtime_config_snapshot snapshot;
+    struct zmk_runtime_config_validation_result validation;
+    int ret;
+
+    if (!update_id) {
+        return -EINVAL;
+    }
+
+    /*
+     * The reset RPC is an internal producer of a valid empty snapshot. It uses
+     * the same staged/persisted A/B transaction as an uploaded snapshot, but
+     * has no public protobuf payload to upload.
+     */
+    ret = zmk_runtime_config_begin_update(expected_active_generation, 1U, update_id);
+    if (ret != 0) {
+        return ret;
+    }
+
+    zmk_runtime_config_init_empty_snapshot(&snapshot);
+    ret = zmk_runtime_config_stage_snapshot(&snapshot, &validation);
+    if (ret != 0) {
+        (void)zmk_runtime_config_abort_update(*update_id);
+        return ret;
+    }
+
+    staged_config.update.validated = true;
+    return 0;
+}
+
 int zmk_runtime_config_upload_update_chunk(uint32_t update_id, size_t offset, const uint8_t *chunk,
                                            size_t chunk_size, size_t *accepted_bytes,
                                            size_t *next_offset) {
@@ -1489,6 +1519,37 @@ zmk_runtime_config_get_keymap_override(uint8_t layer_id, uint16_t key_position) 
     return NULL;
 }
 
+void zmk_runtime_config_get_active_snapshot(struct zmk_runtime_config_snapshot *snapshot) {
+    if (!snapshot) {
+        return;
+    }
+
+    zmk_runtime_config_init_empty_snapshot(snapshot);
+    if (!active_config.present) {
+        return;
+    }
+
+    snapshot->generation = active_config.generation;
+    snapshot->keymap_override_count = active_config.keymap_override_count;
+    snapshot->object_count = active_config.object_count;
+    snapshot->combo_count = active_config.combo_count;
+    snapshot->macro_step_count = active_config.macro_step_count;
+    snapshot->tap_dance_action_count = active_config.tap_dance_action_count;
+}
+
+const struct zmk_runtime_keymap_override *
+zmk_runtime_config_get_active_keymap_override(size_t index) {
+    if (!active_config.present || index >= active_config.keymap_override_count) {
+        return NULL;
+    }
+
+    return &active_config.keymap_overrides[index];
+}
+
+size_t zmk_runtime_config_get_active_keymap_override_count(void) {
+    return active_config.present ? active_config.keymap_override_count : 0U;
+}
+
 const struct zmk_runtime_object_slot *
 zmk_runtime_config_get_active_object(zmk_runtime_object_id_t object_id) {
     if (!active_config.present) {
@@ -1496,6 +1557,18 @@ zmk_runtime_config_get_active_object(zmk_runtime_object_id_t object_id) {
     }
 
     return find_object(active_config.objects, active_config.object_count, object_id);
+}
+
+const struct zmk_runtime_object_slot *zmk_runtime_config_get_active_object_at(size_t index) {
+    if (!active_config.present || index >= active_config.object_count) {
+        return NULL;
+    }
+
+    return &active_config.objects[index];
+}
+
+size_t zmk_runtime_config_get_active_object_count(void) {
+    return active_config.present ? active_config.object_count : 0U;
 }
 
 const struct zmk_runtime_combo_slot *zmk_runtime_config_get_active_combo(size_t index) {

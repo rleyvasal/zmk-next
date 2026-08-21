@@ -78,8 +78,10 @@ Three versions are independent:
 | Capability fingerprint | Whether this firmware build supports the requested types, parameters, and limits. |
 
 On connection, the configurator reads the protocol version, persistence schema
-version, capability fingerprint, enabled object types, resource limits, and
-active generation. It must not offer an editor for an unadvertised behavior.
+version, capability fingerprint, enabled object types, resource limits, active
+generation, and the selected-layout-to-stock-position map. It must not offer
+an editor for an unadvertised behavior or upload selected-layout indexes as if
+they were canonical stock positions.
 
 Both firmware and configurator pin the same exact `zmk-next-messages` release
 or commit.
@@ -97,6 +99,11 @@ generation to the inactive Settings slot, then writes that slot's manifest
 last. On boot it selects the newest complete, checksum-valid, capability-
 compatible generation; otherwise it uses the previous valid generation or
 compiled defaults.
+
+`ResetRuntimeConfig` uses the same transaction path: it persists an empty
+runtime overlay as a new generation rather than deleting Settings entries.
+After safe activation, compiled defaults are the effective keymap again while
+the previous valid generation remains an on-flash recovery fallback.
 
 A pending generation activates only when no physical key is pressed, no combo
 is being captured, no hold-tap or tap-dance is undecided, no macro is running,
@@ -160,10 +167,10 @@ is not yet supported inside tap-dance actions.
 
 ## Runtime-editable scope
 
-Once their engines are implemented, ordinary key bindings, layer actions and
-metadata, combos, macros, mod-morphs, hold-taps, and tap-dances are editable
-live. Arbitrary behavior C code, a new hardware/layout matrix, and resource
-growth beyond build-time pools are not.
+Once their engines are implemented, ordinary key bindings, layer actions,
+combos, macros, mod-morphs, hold-taps, and tap-dances are editable live.
+Arbitrary behavior C code, layer metadata, a new hardware/layout matrix, and
+resource growth beyond build-time pools are not.
 
 ## Delivery order
 
@@ -175,6 +182,7 @@ growth beyond build-time pools are not.
 5. Combos.
 6. Hold-taps with shared per-invocation state and activation blocking.
 7. Tap-dances with per-invocation selected bindings and activation blocking.
+8. Active-snapshot readback and transactional stock reset.
 
 Every increment retains compiled defaults as a recovery fallback and must pass
 decoder, validation, power-loss, activation, split, and resource-limit tests
