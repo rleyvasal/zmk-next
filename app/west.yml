@@ -41,7 +41,7 @@ manifest:
       path: modules/lib/gui/lvgl
       remote: zmkfirmware
     - name: zmk-next-messages
-      revision: 9e864d47a6606445d24c034edca42cc27d093654
+      revision: 1f55cf3e277c83af25e6c2dd71147f385108cc84
       path: modules/msgs/zmk-next-messages
       remote: rleyvasal
   group-filter: [+optional]

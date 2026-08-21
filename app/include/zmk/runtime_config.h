@@ -6,6 +6,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include <zmk/behavior.h>
@@ -85,7 +86,7 @@ struct zmk_runtime_config_pool {
     struct zmk_runtime_object_slot objects[CONFIG_ZMK_RUNTIME_MAX_OBJECTS];
     struct zmk_runtime_combo_slot combos[CONFIG_ZMK_RUNTIME_MAX_COMBOS];
     struct zmk_runtime_macro_step macro_steps[CONFIG_ZMK_RUNTIME_MAX_MACRO_STEPS];
-    uint8_t persisted_bytes[CONFIG_ZMK_RUNTIME_MAX_PERSISTED_BYTES];
+    uint8_t serialized_bytes[CONFIG_ZMK_RUNTIME_MAX_PERSISTED_BYTES];
 };
 
 struct zmk_runtime_capabilities {
@@ -120,3 +121,13 @@ int zmk_runtime_config_validate_snapshot(const struct zmk_runtime_config_snapsho
 int zmk_runtime_config_stage_snapshot(const struct zmk_runtime_config_snapshot *snapshot,
                                       struct zmk_runtime_config_validation_result *result);
 const struct zmk_runtime_config_snapshot *zmk_runtime_config_staged_snapshot(void);
+
+int zmk_runtime_config_begin_update(uint32_t expected_active_generation, size_t snapshot_size,
+                                    uint32_t *update_id);
+int zmk_runtime_config_upload_update_chunk(uint32_t update_id, size_t offset, const uint8_t *chunk,
+                                           size_t chunk_size, size_t *accepted_bytes,
+                                           size_t *next_offset);
+int zmk_runtime_config_get_uploaded_snapshot(uint32_t update_id, const uint8_t **snapshot_bytes,
+                                             size_t *snapshot_size);
+int zmk_runtime_config_abort_update(uint32_t update_id);
+size_t zmk_runtime_config_max_update_chunk_bytes(void);

@@ -14,6 +14,13 @@ static struct {
     bool present;
     struct zmk_runtime_config_snapshot snapshot;
     struct zmk_runtime_config_pool pool;
+    struct {
+        bool active;
+        uint32_t id;
+        size_t expected_size;
+        size_t received_size;
+    } update;
+    uint32_t next_update_id;
 } staged_config;
 
 static void
@@ -81,4 +88,101 @@ int zmk_runtime_config_stage_snapshot(const struct zmk_runtime_config_snapshot *
 
 const struct zmk_runtime_config_snapshot *zmk_runtime_config_staged_snapshot(void) {
     return staged_config.present ? &staged_config.snapshot : NULL;
+}
+
+int zmk_runtime_config_begin_update(uint32_t expected_active_generation, size_t snapshot_size,
+                                    uint32_t *update_id) {
+    if (!update_id || snapshot_size == 0U) {
+        return -EINVAL;
+    }
+
+    /* Phase 0 has no persistent active generation; zero accepts that initial state. */
+    if (expected_active_generation != 0U) {
+        return -ESTALE;
+    }
+
+    if (staged_config.update.active) {
+        return -EBUSY;
+    }
+
+    if (snapshot_size > sizeof(staged_config.pool.serialized_bytes)) {
+        return -ENOSPC;
+    }
+
+    staged_config.next_update_id++;
+    if (staged_config.next_update_id == 0U) {
+        staged_config.next_update_id++;
+    }
+
+    staged_config.update.active = true;
+    staged_config.update.id = staged_config.next_update_id;
+    staged_config.update.expected_size = snapshot_size;
+    staged_config.update.received_size = 0U;
+    *update_id = staged_config.update.id;
+
+    return 0;
+}
+
+int zmk_runtime_config_upload_update_chunk(uint32_t update_id, size_t offset, const uint8_t *chunk,
+                                           size_t chunk_size, size_t *accepted_bytes,
+                                           size_t *next_offset) {
+    if (!accepted_bytes || !next_offset || !chunk || chunk_size == 0U) {
+        return -EINVAL;
+    }
+
+    if (!staged_config.update.active || staged_config.update.id != update_id) {
+        return -ENOENT;
+    }
+
+    if (chunk_size > CONFIG_ZMK_RUNTIME_CONFIG_RPC_MAX_CHUNK_BYTES) {
+        return -EMSGSIZE;
+    }
+
+    if (offset != staged_config.update.received_size) {
+        return -EINVAL;
+    }
+
+    if (chunk_size > staged_config.update.expected_size - offset) {
+        return -EFBIG;
+    }
+
+    memcpy(&staged_config.pool.serialized_bytes[offset], chunk, chunk_size);
+    staged_config.update.received_size += chunk_size;
+    *accepted_bytes = chunk_size;
+    *next_offset = staged_config.update.received_size;
+
+    return 0;
+}
+
+int zmk_runtime_config_get_uploaded_snapshot(uint32_t update_id, const uint8_t **snapshot_bytes,
+                                             size_t *snapshot_size) {
+    if (!snapshot_bytes || !snapshot_size) {
+        return -EINVAL;
+    }
+
+    if (!staged_config.update.active || staged_config.update.id != update_id) {
+        return -ENOENT;
+    }
+
+    if (staged_config.update.received_size != staged_config.update.expected_size) {
+        return -EAGAIN;
+    }
+
+    *snapshot_bytes = staged_config.pool.serialized_bytes;
+    *snapshot_size = staged_config.update.expected_size;
+
+    return 0;
+}
+
+int zmk_runtime_config_abort_update(uint32_t update_id) {
+    if (!staged_config.update.active || staged_config.update.id != update_id) {
+        return -ENOENT;
+    }
+
+    memset(&staged_config.update, 0, sizeof(staged_config.update));
+    return 0;
+}
+
+size_t zmk_runtime_config_max_update_chunk_bytes(void) {
+    return CONFIG_ZMK_RUNTIME_CONFIG_RPC_MAX_CHUNK_BYTES;
 }

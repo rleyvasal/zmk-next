@@ -54,6 +54,15 @@ config ZMK_RUNTIME_CONFIG_RPC
     default y
     help
       Expose the ZMK Next Runtime Config subsystem through the existing Studio
-      USB serial and BLE transports. Phase 0 exposes capabilities only.
+      USB serial and BLE transports.
+
+config ZMK_RUNTIME_CONFIG_RPC_MAX_CHUNK_BYTES
+    int "Maximum Runtime Config RPC chunk size"
+    range 16 1024
+    default 128
+    help
+      Largest RuntimeConfigSnapshot upload chunk accepted by firmware. This
+      bounds RAM required for each decoded RPC request; complete snapshots are
+      assembled in the fixed serialized-snapshot buffer.
 
 endif
