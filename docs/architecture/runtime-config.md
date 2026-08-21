@@ -115,10 +115,17 @@ Version 0.1 accepts ordinary bindings and existing compiled layer actions with
 their normal parameters. It also supports a runtime mod-morph object: on key
 press, the dispatcher resolves its normal or morphed compiled action and saves
 that exact choice in per-key invocation state, so key release cannot be
-affected by modifier changes or a configuration activation. Mod-morph child
-actions are compiled bindings in this increment; runtime-object nesting is
-rejected until the object graph has a complete recursion and lifetime model.
-Layer metadata, macros, combos, hold-taps, and tap-dances remain unsupported.
+affected by modifier changes or a configuration activation.
+
+Runtime macros use a fixed shared step pool and support `tap`, `press`,
+`release`, explicit `wait`, and `pause-until-release` instructions. A tap uses
+the firmware's compiled default tap duration. Macro `press` and `release`
+instructions must balance within one macro, so a complete program cannot leave
+a binding held. Each running macro holds an activation blocker until it
+finishes, including while waiting or paused. Mod-morph and macro child actions
+are compiled bindings in this increment; runtime-object nesting is rejected
+until the object graph has a complete recursion and lifetime model. Layer
+metadata, combos, hold-taps, and tap-dances remain unsupported.
 
 ## Runtime-editable scope
 
@@ -133,7 +140,7 @@ growth beyond build-time pools are not.
    persistence with no live dispatch.
 2. Safe activation and ordinary binding/layer overlay.
 3. Action references, the runtime dispatcher, and mod-morphs.
-4. Macros.
+4. Macros with timing and pause-until-release.
 5. Combos.
 6. Hold-taps and tap-dances after their invocation-lifetime tests are robust.
 

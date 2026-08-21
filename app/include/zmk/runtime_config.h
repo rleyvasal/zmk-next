@@ -11,7 +11,7 @@
 
 #include <zmk/behavior.h>
 
-#define ZMK_RUNTIME_CONFIG_PERSISTENCE_SCHEMA_VERSION 2U
+#define ZMK_RUNTIME_CONFIG_PERSISTENCE_SCHEMA_VERSION 3U
 #define ZMK_RUNTIME_CAPABILITY_FINGERPRINT_SIZE 16U
 #define ZMK_RUNTIME_OBJECT_ID_INVALID 0U
 #define ZMK_RUNTIME_DISPATCH_BEHAVIOR_NAME "runtime_object"
@@ -50,11 +50,17 @@ struct zmk_runtime_mod_morph_config {
     struct zmk_runtime_action_ref morphed_action;
 };
 
+struct zmk_runtime_macro_config {
+    uint16_t step_offset;
+    uint16_t step_count;
+};
+
 struct zmk_runtime_object_slot {
     zmk_runtime_object_id_t id;
     enum zmk_runtime_object_type type;
     union {
         struct zmk_runtime_mod_morph_config mod_morph;
+        struct zmk_runtime_macro_config macro;
     } data;
 };
 
@@ -105,6 +111,7 @@ struct zmk_runtime_config_pool {
     uint16_t object_count;
     struct zmk_runtime_object_slot objects[CONFIG_ZMK_RUNTIME_MAX_OBJECTS];
     struct zmk_runtime_combo_slot combos[CONFIG_ZMK_RUNTIME_MAX_COMBOS];
+    uint16_t macro_step_count;
     struct zmk_runtime_macro_step macro_steps[CONFIG_ZMK_RUNTIME_MAX_MACRO_STEPS];
     uint8_t serialized_bytes[CONFIG_ZMK_RUNTIME_MAX_PERSISTED_BYTES];
 };
@@ -174,6 +181,11 @@ int zmk_runtime_config_set_staged_objects(uint32_t update_id,
                                           size_t count);
 int zmk_runtime_config_append_staged_object(uint32_t update_id,
                                             const struct zmk_runtime_object_slot *object);
+int zmk_runtime_config_set_staged_macro_steps(uint32_t update_id,
+                                              const struct zmk_runtime_macro_step *steps,
+                                              size_t count);
+int zmk_runtime_config_append_staged_macro_step(uint32_t update_id,
+                                                const struct zmk_runtime_macro_step *step);
 int zmk_runtime_config_get_validated_uploaded_snapshot(uint32_t update_id,
                                                        const uint8_t **snapshot_bytes,
                                                        size_t *snapshot_size);
@@ -191,6 +203,9 @@ const struct zmk_behavior_binding *
 zmk_runtime_config_get_keymap_override(uint8_t layer_id, uint16_t key_position);
 const struct zmk_runtime_object_slot *
 zmk_runtime_config_get_active_object(zmk_runtime_object_id_t object_id);
+int zmk_runtime_config_get_active_macro_steps(
+    zmk_runtime_object_id_t object_id, const struct zmk_runtime_macro_step **steps,
+    size_t *step_count);
 int zmk_runtime_config_action_ref_to_binding(const struct zmk_runtime_action_ref *action,
                                              struct zmk_behavior_binding *binding);
 

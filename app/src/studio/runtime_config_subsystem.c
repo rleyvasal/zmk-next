@@ -66,6 +66,9 @@ static bool encode_runtime_features(pb_ostream_t *stream, const pb_field_t *fiel
     const uint32_t features[] = {
         zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_KEYMAP_OVERRIDES,
         zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_MOD_MORPHS,
+        zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_MACROS,
+        zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_MACRO_WAIT,
+        zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_MACRO_PAUSE_UNTIL_RELEASE,
     };
 
     ARG_UNUSED(arg);
@@ -83,6 +86,7 @@ static bool encode_runtime_object_types(pb_ostream_t *stream, const pb_field_t *
                                         void *const *arg) {
     const uint32_t types[] = {
         zmk_runtime_config_RuntimeObjectType_RUNTIME_OBJECT_TYPE_MOD_MORPH,
+        zmk_runtime_config_RuntimeObjectType_RUNTIME_OBJECT_TYPE_MACRO,
     };
 
     ARG_UNUSED(arg);
@@ -206,6 +210,7 @@ struct snapshot_decode_context {
     uint32_t update_id;
     uint16_t keymap_override_count;
     uint16_t object_count;
+    uint16_t macro_step_count;
     int error;
     bool unsupported_content;
 };
@@ -291,35 +296,156 @@ static bool decode_keymap_override(pb_istream_t *stream, const pb_field_t *field
     return true;
 }
 
-static bool decode_runtime_object(pb_istream_t *stream, const pb_field_t *field, void **arg) {
+static bool decode_macro_step(pb_istream_t *stream, const pb_field_t *field, void **arg) {
     struct snapshot_decode_context *context = *arg;
-    zmk_runtime_config_RuntimeObject wire_object = zmk_runtime_config_RuntimeObject_init_zero;
-    struct zmk_runtime_object_slot object = {0};
+    zmk_runtime_config_MacroStep wire_step = zmk_runtime_config_MacroStep_init_zero;
+    struct zmk_runtime_macro_step step = {0};
     int ret;
+
     ARG_UNUSED(field);
 
-    if (!pb_decode(stream, &zmk_runtime_config_RuntimeObject_msg, &wire_object)) {
+    if (!pb_decode(stream, &zmk_runtime_config_MacroStep_msg, &wire_step)) {
         return false;
     }
 
-    if (wire_object.id == ZMK_RUNTIME_OBJECT_ID_INVALID ||
-        wire_object.which_definition != zmk_runtime_config_RuntimeObject_mod_morph_tag ||
-        !wire_object.definition.mod_morph.has_normal_action ||
-        !wire_object.definition.mod_morph.has_morphed_action ||
-        decode_action_reference(&wire_object.definition.mod_morph.normal_action, false,
-                                &object.data.mod_morph.normal_action) != 0 ||
-        decode_action_reference(&wire_object.definition.mod_morph.morphed_action, false,
-                                &object.data.mod_morph.morphed_action) != 0) {
-        context->error = wire_object.which_definition ==
-                                 zmk_runtime_config_RuntimeObject_mod_morph_tag
-                             ? -EINVAL
-                             : -ENOTSUP;
+    switch (wire_step.which_instruction) {
+    case zmk_runtime_config_MacroStep_tap_tag:
+        step.type = ZMK_RUNTIME_MACRO_STEP_TAP;
+        ret = decode_action_reference(&wire_step.instruction.tap, false, &step.data.action);
+        break;
+    case zmk_runtime_config_MacroStep_press_tag:
+        step.type = ZMK_RUNTIME_MACRO_STEP_PRESS;
+        ret = decode_action_reference(&wire_step.instruction.press, false, &step.data.action);
+        break;
+    case zmk_runtime_config_MacroStep_release_tag:
+        step.type = ZMK_RUNTIME_MACRO_STEP_RELEASE;
+        ret = decode_action_reference(&wire_step.instruction.release, false, &step.data.action);
+        break;
+    case zmk_runtime_config_MacroStep_wait_ms_tag:
+        step.type = ZMK_RUNTIME_MACRO_STEP_WAIT;
+        step.data.duration_ms = wire_step.instruction.wait_ms;
+        ret = 0;
+        break;
+    case zmk_runtime_config_MacroStep_pause_until_release_tag:
+        step.type = ZMK_RUNTIME_MACRO_STEP_PAUSE_UNTIL_RELEASE;
+        ret = wire_step.instruction.pause_until_release ? 0 : -EINVAL;
+        break;
+    default:
+        ret = -EINVAL;
+        break;
+    }
+
+    if (ret != 0) {
+        context->error = ret;
         return false;
     }
 
-    object.id = wire_object.id;
-    object.type = ZMK_RUNTIME_OBJECT_TYPE_MOD_MORPH;
-    object.data.mod_morph.modifiers = wire_object.definition.mod_morph.modifiers;
+    ret = zmk_runtime_config_append_staged_macro_step(context->update_id, &step);
+    if (ret != 0) {
+        context->error = ret;
+        return false;
+    }
+
+    context->macro_step_count++;
+    return true;
+}
+
+static bool decode_runtime_object(pb_istream_t *stream, const pb_field_t *field, void **arg) {
+    struct snapshot_decode_context *context = *arg;
+    struct zmk_runtime_object_slot object = {0};
+    uint32_t wire_id = 0U;
+    bool has_id = false;
+    bool has_definition = false;
+    bool eof = false;
+    int ret;
+
+    ARG_UNUSED(field);
+
+    while (stream->bytes_left != 0U) {
+        pb_wire_type_t wire_type;
+        uint32_t tag;
+
+        if (!pb_decode_tag(stream, &wire_type, &tag, &eof)) {
+            return false;
+        }
+
+        if (eof) {
+            break;
+        }
+
+        switch (tag) {
+        case zmk_runtime_config_RuntimeObject_id_tag:
+            if (has_id || wire_type != PB_WT_VARINT || !pb_decode_varint(stream, &wire_id) ||
+                wire_id == ZMK_RUNTIME_OBJECT_ID_INVALID) {
+                context->error = -EINVAL;
+                return false;
+            }
+            has_id = true;
+            break;
+        case zmk_runtime_config_RuntimeObject_mod_morph_tag: {
+            pb_istream_t substream;
+            zmk_runtime_config_ModMorphObject wire_mod_morph =
+                zmk_runtime_config_ModMorphObject_init_zero;
+
+            if (has_definition || wire_type != PB_WT_STRING ||
+                !pb_make_string_substream(stream, &substream) ||
+                !pb_decode(&substream, &zmk_runtime_config_ModMorphObject_msg, &wire_mod_morph) ||
+                !pb_close_string_substream(stream, &substream) ||
+                !wire_mod_morph.has_normal_action || !wire_mod_morph.has_morphed_action ||
+                decode_action_reference(&wire_mod_morph.normal_action, false,
+                                        &object.data.mod_morph.normal_action) != 0 ||
+                decode_action_reference(&wire_mod_morph.morphed_action, false,
+                                        &object.data.mod_morph.morphed_action) != 0) {
+                context->error = -EINVAL;
+                return false;
+            }
+
+            object.type = ZMK_RUNTIME_OBJECT_TYPE_MOD_MORPH;
+            object.data.mod_morph.modifiers = wire_mod_morph.modifiers;
+            has_definition = true;
+            break;
+        }
+        case zmk_runtime_config_RuntimeObject_macro_tag: {
+            pb_istream_t substream;
+            zmk_runtime_config_MacroObject wire_macro = zmk_runtime_config_MacroObject_init_zero;
+            uint16_t step_offset = context->macro_step_count;
+
+            wire_macro.steps.funcs.decode = decode_macro_step;
+            wire_macro.steps.arg = context;
+            if (has_definition || wire_type != PB_WT_STRING ||
+                !pb_make_string_substream(stream, &substream) ||
+                !pb_decode(&substream, &zmk_runtime_config_MacroObject_msg, &wire_macro) ||
+                !pb_close_string_substream(stream, &substream)) {
+                if (context->error == 0) {
+                    context->error = -EINVAL;
+                }
+                return false;
+            }
+
+            object.type = ZMK_RUNTIME_OBJECT_TYPE_MACRO;
+            object.data.macro.step_offset = step_offset;
+            object.data.macro.step_count = context->macro_step_count - step_offset;
+            has_definition = true;
+            break;
+        }
+        case zmk_runtime_config_RuntimeObject_hold_tap_tag:
+        case zmk_runtime_config_RuntimeObject_tap_dance_tag:
+            context->error = -ENOTSUP;
+            return false;
+        default:
+            if (!pb_skip_field(stream, wire_type)) {
+                return false;
+            }
+            break;
+        }
+    }
+
+    if (!has_id || !has_definition) {
+        context->error = -EINVAL;
+        return false;
+    }
+
+    object.id = wire_id;
     ret = zmk_runtime_config_append_staged_object(context->update_id, &object);
     if (ret != 0) {
         context->error = ret;
@@ -350,6 +476,11 @@ static int decode_uploaded_snapshot(uint32_t update_id,
     }
 
     ret = zmk_runtime_config_set_staged_objects(update_id, NULL, 0U);
+    if (ret != 0) {
+        return ret;
+    }
+
+    ret = zmk_runtime_config_set_staged_macro_steps(update_id, NULL, 0U);
     if (ret != 0) {
         return ret;
     }
@@ -389,6 +520,7 @@ static int decode_uploaded_snapshot(uint32_t update_id,
     snapshot->generation = wire_snapshot.generation;
     snapshot->keymap_override_count = context.keymap_override_count;
     snapshot->object_count = context.object_count;
+    snapshot->macro_step_count = context.macro_step_count;
     memcpy(snapshot->capability_fingerprint, wire_snapshot.capability_fingerprint.bytes,
            sizeof(snapshot->capability_fingerprint));
 
