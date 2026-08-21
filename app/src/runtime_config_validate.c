@@ -46,9 +46,8 @@ int zmk_runtime_config_validate_snapshot(const struct zmk_runtime_config_snapsho
         return invalidate(result, ZMK_RUNTIME_CONFIG_ERROR_RESOURCE_LIMIT, -ENOSPC);
     }
 
-    /* The overlay is the first live content type. Advanced engines follow later. */
-    if (snapshot->object_count != 0 || snapshot->combo_count != 0 ||
-        snapshot->macro_step_count != 0) {
+    /* Mod-morph is the first runtime object engine. Other engines follow later. */
+    if (snapshot->combo_count != 0 || snapshot->macro_step_count != 0) {
         return invalidate(result, ZMK_RUNTIME_CONFIG_ERROR_UNSUPPORTED_CONTENT, -ENOTSUP);
     }
 

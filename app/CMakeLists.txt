@@ -82,6 +82,8 @@ if ((NOT CONFIG_ZMK_SPLIT) OR CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
   target_sources_ifdef(CONFIG_ZMK_RUNTIME_CONFIG app PRIVATE src/runtime_config_validate.c)
   target_sources_ifdef(CONFIG_ZMK_RUNTIME_CONFIG app PRIVATE src/runtime_config_settings.c)
   target_sources_ifdef(CONFIG_ZMK_RUNTIME_CONFIG app PRIVATE src/runtime_config_activation.c)
+  target_sources_ifdef(CONFIG_ZMK_RUNTIME_CONFIG app PRIVATE src/runtime_dispatch.c)
+  target_sources_ifdef(CONFIG_ZMK_RUNTIME_CONFIG app PRIVATE src/behaviors/behavior_runtime_object.c)
   target_sources_ifdef(CONFIG_ZMK_HID_INDICATORS app PRIVATE src/hid_indicators.c)
 
   if (CONFIG_ZMK_BLE)

@@ -1,0 +1,8 @@
+# Copyright (c) 2026 The ZMK Next Contributors
+# SPDX-License-Identifier: MIT
+
+description: Runtime-configured behavior object dispatcher
+
+compatible: "zmk,behavior-runtime-object"
+
+include: one_param.yaml

@@ -7,9 +7,9 @@ menuconfig ZMK_RUNTIME_CONFIG
     help
       Enable bounded ZMK Next runtime configuration: the snapshot model,
       Studio RPC service, transactional Settings storage, and safe activation
-      coordinator. It overlays compiled behavior bindings when an active
-      runtime snapshot supplies an override; later phases add runtime-object
-      dispatch and advanced behavior engines.
+      coordinator. It overlays compiled behavior bindings or runtime objects
+      when an active runtime snapshot supplies an override; later phases add
+      further advanced behavior engines.
 
 if ZMK_RUNTIME_CONFIG
 

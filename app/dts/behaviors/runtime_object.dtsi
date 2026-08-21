@@ -1,0 +1,14 @@
+/*
+ * Copyright (c) 2026 The ZMK Next Contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/ {
+    behaviors {
+        rt: runtime_object {
+            compatible = "zmk,behavior-runtime-object";
+            #binding-cells = <1>;
+            display-name = "Runtime Object";
+        };
+    };
+};

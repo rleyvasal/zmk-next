@@ -32,26 +32,42 @@ static struct {
     bool present;
     uint32_t generation;
     uint16_t keymap_override_count;
+    uint16_t object_count;
     struct zmk_runtime_keymap_override
         keymap_overrides[CONFIG_ZMK_RUNTIME_MAX_KEYMAP_OVERRIDES];
+    struct zmk_runtime_object_slot objects[CONFIG_ZMK_RUNTIME_MAX_OBJECTS];
     struct zmk_behavior_binding bindings[CONFIG_ZMK_RUNTIME_MAX_KEYMAP_OVERRIDES];
 } pending_config, active_config;
 
 #define RUNTIME_CONFIG_PERSISTED_PAYLOAD_MAGIC 0x5A4E4B4FU
-#define RUNTIME_CONFIG_PERSISTED_PAYLOAD_VERSION 1U
+#define RUNTIME_CONFIG_PERSISTED_PAYLOAD_VERSION 2U
 
 struct runtime_config_persisted_payload_header {
     uint32_t magic;
     uint16_t version;
     uint16_t keymap_override_count;
+    uint16_t object_count;
+} __packed;
+
+struct runtime_config_persisted_action_ref {
+    uint8_t kind;
+    zmk_behavior_local_id_t local_id;
+    uint32_t param1;
+    uint32_t param2;
+    zmk_runtime_object_id_t object_id;
 } __packed;
 
 struct runtime_config_persisted_keymap_override {
     uint8_t layer_id;
     uint16_t key_position;
-    zmk_behavior_local_id_t behavior_id;
-    uint32_t param1;
-    uint32_t param2;
+    struct runtime_config_persisted_action_ref action;
+} __packed;
+
+struct runtime_config_persisted_mod_morph {
+    zmk_runtime_object_id_t id;
+    uint32_t modifiers;
+    struct runtime_config_persisted_action_ref normal_action;
+    struct runtime_config_persisted_action_ref morphed_action;
 } __packed;
 
 static void
@@ -112,6 +128,131 @@ void zmk_runtime_config_init_empty_snapshot(struct zmk_runtime_config_snapshot *
            sizeof(snapshot->capability_fingerprint));
 }
 
+static const struct zmk_runtime_object_slot *find_object(
+    const struct zmk_runtime_object_slot *objects, size_t count,
+    zmk_runtime_object_id_t object_id) {
+    if (object_id == ZMK_RUNTIME_OBJECT_ID_INVALID) {
+        return NULL;
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        if (objects[i].id == object_id) {
+            return &objects[i];
+        }
+    }
+
+    return NULL;
+}
+
+static int compiled_action_to_binding(const struct zmk_runtime_action_ref *action,
+                                      struct zmk_behavior_binding *binding) {
+    const char *behavior_name;
+
+    if (!action || !binding || action->kind != ZMK_RUNTIME_ACTION_COMPILED_BEHAVIOR ||
+        action->data.compiled.local_id == 0U) {
+        return -EINVAL;
+    }
+
+    behavior_name =
+        zmk_behavior_find_behavior_name_from_local_id(action->data.compiled.local_id);
+    if (!behavior_name) {
+        return -ENODEV;
+    }
+
+    /* Runtime objects must use the typed ActionRef variant so their IDs are validated. */
+    if (strcmp(behavior_name, ZMK_RUNTIME_DISPATCH_BEHAVIOR_NAME) == 0) {
+        return -EINVAL;
+    }
+
+    *binding = (struct zmk_behavior_binding){
+#if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_LOCAL_IDS_IN_BINDINGS)
+        .local_id = action->data.compiled.local_id,
+#endif
+        .behavior_dev = behavior_name,
+        .param1 = action->data.compiled.param1,
+        .param2 = action->data.compiled.param2,
+    };
+
+    return zmk_behavior_validate_binding(binding);
+}
+
+static int object_action_to_binding(zmk_runtime_object_id_t object_id,
+                                    struct zmk_behavior_binding *binding) {
+    const char *behavior_name = ZMK_RUNTIME_DISPATCH_BEHAVIOR_NAME;
+
+    if (object_id == ZMK_RUNTIME_OBJECT_ID_INVALID || !binding ||
+        !zmk_behavior_get_binding(behavior_name)) {
+        return -ENODEV;
+    }
+
+    *binding = (struct zmk_behavior_binding){
+#if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_LOCAL_IDS_IN_BINDINGS)
+        .local_id = zmk_behavior_get_local_id(behavior_name),
+#endif
+        .behavior_dev = behavior_name,
+        .param1 = object_id,
+    };
+
+    return zmk_behavior_validate_binding(binding);
+}
+
+static int action_to_binding(const struct zmk_runtime_action_ref *action,
+                             const struct zmk_runtime_object_slot *objects, size_t object_count,
+                             bool allow_runtime_object, struct zmk_behavior_binding *binding) {
+    if (!action || !binding) {
+        return -EINVAL;
+    }
+
+    if (action->kind == ZMK_RUNTIME_ACTION_COMPILED_BEHAVIOR) {
+        return compiled_action_to_binding(action, binding);
+    }
+
+    if (allow_runtime_object && action->kind == ZMK_RUNTIME_ACTION_OBJECT &&
+        find_object(objects, object_count, action->data.object_id)) {
+        return object_action_to_binding(action->data.object_id, binding);
+    }
+
+    return -EINVAL;
+}
+
+static int validate_object(const struct zmk_runtime_object_slot *object) {
+    struct zmk_behavior_binding binding;
+
+    if (!object || object->id == ZMK_RUNTIME_OBJECT_ID_INVALID ||
+        object->type != ZMK_RUNTIME_OBJECT_TYPE_MOD_MORPH ||
+        object->data.mod_morph.modifiers == 0U) {
+        return -EINVAL;
+    }
+
+    if (action_to_binding(&object->data.mod_morph.normal_action, NULL, 0U, false, &binding) != 0 ||
+        action_to_binding(&object->data.mod_morph.morphed_action, NULL, 0U, false, &binding) !=
+            0) {
+        return -EINVAL;
+    }
+
+    return 0;
+}
+
+static int validate_objects(const struct zmk_runtime_object_slot *objects, size_t count) {
+    if ((!objects && count != 0U) || count > CONFIG_ZMK_RUNTIME_MAX_OBJECTS) {
+        return -EINVAL;
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        if (validate_object(&objects[i]) != 0) {
+            return -EINVAL;
+        }
+
+        for (size_t previous = 0; previous < i; previous++) {
+            if (objects[previous].id == objects[i].id) {
+                return -EEXIST;
+            }
+        }
+    }
+
+    return 0;
+}
+
 int zmk_runtime_config_stage_snapshot(const struct zmk_runtime_config_snapshot *snapshot,
                                       struct zmk_runtime_config_validation_result *result) {
     int ret = zmk_runtime_config_validate_snapshot(snapshot, result);
@@ -160,7 +301,9 @@ int zmk_runtime_config_begin_update(uint32_t expected_active_generation, size_t 
     staged_config.update.expected_size = snapshot_size;
     staged_config.update.received_size = 0U;
     staged_config.pool.keymap_override_count = 0U;
+    staged_config.pool.object_count = 0U;
     memset(staged_config.pool.keymap_overrides, 0, sizeof(staged_config.pool.keymap_overrides));
+    memset(staged_config.pool.objects, 0, sizeof(staged_config.pool.objects));
     *update_id = staged_config.update.id;
 
     return 0;
@@ -234,31 +377,33 @@ int zmk_runtime_config_stage_uploaded_snapshot(
     (void)serialized_size;
 
     ret = zmk_runtime_config_stage_snapshot(snapshot, result);
-    if (ret == 0 && snapshot->keymap_override_count != staged_config.pool.keymap_override_count) {
+    if (ret == 0 && (snapshot->keymap_override_count != staged_config.pool.keymap_override_count ||
+                     snapshot->object_count != staged_config.pool.object_count)) {
         if (result) {
             result->valid = false;
             result->error = ZMK_RUNTIME_CONFIG_ERROR_INVALID_ARGUMENT;
         }
         ret = -EINVAL;
     }
+
+    if (ret == 0) {
+        ret = validate_objects(staged_config.pool.objects, staged_config.pool.object_count);
+        if (ret != 0 && result) {
+            result->valid = false;
+            result->error = ZMK_RUNTIME_CONFIG_ERROR_INVALID_ARGUMENT;
+        }
+    }
+
     if (ret == 0) {
         for (size_t i = 0; i < staged_config.pool.keymap_override_count; i++) {
             const struct zmk_runtime_keymap_override *override =
                 &staged_config.pool.keymap_overrides[i];
-            const char *behavior_name =
-                zmk_behavior_find_behavior_name_from_local_id(override->behavior_id);
-            struct zmk_behavior_binding binding = {
-#if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_LOCAL_IDS_IN_BINDINGS)
-                .local_id = override->behavior_id,
-#endif
-                .behavior_dev = behavior_name,
-                .param1 = override->param1,
-                .param2 = override->param2,
-            };
+            struct zmk_behavior_binding binding;
 
             if (override->layer_id >= ZMK_KEYMAP_LAYERS_LEN ||
-                override->key_position >= ZMK_KEYMAP_LEN || !behavior_name ||
-                zmk_behavior_validate_binding(&binding) != 0) {
+                override->key_position >= ZMK_KEYMAP_LEN ||
+                action_to_binding(&override->action, staged_config.pool.objects,
+                                  staged_config.pool.object_count, true, &binding) != 0) {
                 if (result) {
                     result->valid = false;
                     result->error = ZMK_RUNTIME_CONFIG_ERROR_INVALID_ARGUMENT;
@@ -332,6 +477,47 @@ int zmk_runtime_config_append_staged_keymap_override(
     return 0;
 }
 
+int zmk_runtime_config_set_staged_objects(uint32_t update_id,
+                                          const struct zmk_runtime_object_slot *objects,
+                                          size_t count) {
+    if ((!objects && count != 0U) || count > CONFIG_ZMK_RUNTIME_MAX_OBJECTS) {
+        return -EINVAL;
+    }
+
+    if (!staged_config.update.active || staged_config.update.id != update_id) {
+        return -ENOENT;
+    }
+
+    if (count != 0U) {
+        memcpy(staged_config.pool.objects, objects,
+               count * sizeof(staged_config.pool.objects[0]));
+    }
+    staged_config.pool.object_count = count;
+    return 0;
+}
+
+int zmk_runtime_config_append_staged_object(uint32_t update_id,
+                                            const struct zmk_runtime_object_slot *object) {
+    uint16_t index;
+
+    if (!object) {
+        return -EINVAL;
+    }
+
+    if (!staged_config.update.active || staged_config.update.id != update_id) {
+        return -ENOENT;
+    }
+
+    index = staged_config.pool.object_count;
+    if (index >= CONFIG_ZMK_RUNTIME_MAX_OBJECTS) {
+        return -ENOSPC;
+    }
+
+    staged_config.pool.objects[index] = *object;
+    staged_config.pool.object_count++;
+    return 0;
+}
+
 int zmk_runtime_config_get_validated_uploaded_snapshot(uint32_t update_id,
                                                        const uint8_t **snapshot_bytes,
                                                        size_t *snapshot_size) {
@@ -344,24 +530,85 @@ int zmk_runtime_config_get_validated_uploaded_snapshot(uint32_t update_id,
     return staged_config.update.validated ? 0 : -EINVAL;
 }
 
+static struct runtime_config_persisted_action_ref persist_action(
+    const struct zmk_runtime_action_ref *action) {
+    return (struct runtime_config_persisted_action_ref){
+        .kind = action->kind,
+        .local_id = action->kind == ZMK_RUNTIME_ACTION_COMPILED_BEHAVIOR
+                        ? action->data.compiled.local_id
+                        : 0U,
+        .param1 = action->kind == ZMK_RUNTIME_ACTION_COMPILED_BEHAVIOR
+                      ? action->data.compiled.param1
+                      : 0U,
+        .param2 = action->kind == ZMK_RUNTIME_ACTION_COMPILED_BEHAVIOR
+                      ? action->data.compiled.param2
+                      : 0U,
+        .object_id = action->kind == ZMK_RUNTIME_ACTION_OBJECT ? action->data.object_id : 0U,
+    };
+}
+
+static struct zmk_runtime_action_ref
+restore_action(const struct runtime_config_persisted_action_ref *action) {
+    if (action->kind == ZMK_RUNTIME_ACTION_COMPILED_BEHAVIOR) {
+        return (struct zmk_runtime_action_ref){
+            .kind = ZMK_RUNTIME_ACTION_COMPILED_BEHAVIOR,
+            .data.compiled = {
+                .local_id = action->local_id,
+                .param1 = action->param1,
+                .param2 = action->param2,
+            },
+        };
+    }
+
+    if (action->kind == ZMK_RUNTIME_ACTION_OBJECT) {
+        return (struct zmk_runtime_action_ref){
+            .kind = ZMK_RUNTIME_ACTION_OBJECT,
+            .data.object_id = action->object_id,
+        };
+    }
+
+    return (struct zmk_runtime_action_ref){0};
+}
+
+int zmk_runtime_config_get_persistable_update_size(uint32_t update_id, size_t *snapshot_size) {
+    struct runtime_config_persisted_payload_header header = {
+        .magic = RUNTIME_CONFIG_PERSISTED_PAYLOAD_MAGIC,
+        .version = RUNTIME_CONFIG_PERSISTED_PAYLOAD_VERSION,
+        .keymap_override_count = staged_config.pool.keymap_override_count,
+        .object_count = staged_config.pool.object_count,
+    };
+    if (!snapshot_size || !staged_config.update.active || staged_config.update.id != update_id ||
+        !staged_config.update.validated) {
+        return -EINVAL;
+    }
+
+    *snapshot_size = sizeof(header) +
+                     header.keymap_override_count *
+                         sizeof(struct runtime_config_persisted_keymap_override) +
+                     header.object_count * sizeof(struct runtime_config_persisted_mod_morph);
+    return *snapshot_size > sizeof(staged_config.pool.serialized_bytes) ? -ENOSPC : 0;
+}
+
 int zmk_runtime_config_get_persistable_update(uint32_t update_id, const uint8_t **snapshot_bytes,
                                               size_t *snapshot_size) {
     struct runtime_config_persisted_payload_header header = {
         .magic = RUNTIME_CONFIG_PERSISTED_PAYLOAD_MAGIC,
         .version = RUNTIME_CONFIG_PERSISTED_PAYLOAD_VERSION,
         .keymap_override_count = staged_config.pool.keymap_override_count,
+        .object_count = staged_config.pool.object_count,
     };
     size_t payload_size;
     int ret;
 
-    ret = zmk_runtime_config_get_validated_uploaded_snapshot(update_id, snapshot_bytes, snapshot_size);
+    if (!snapshot_bytes) {
+        return -EINVAL;
+    }
+
+    ret = zmk_runtime_config_get_persistable_update_size(update_id, &payload_size);
     if (ret != 0) {
         return ret;
     }
 
-    payload_size = sizeof(header) +
-                   header.keymap_override_count *
-                       sizeof(struct runtime_config_persisted_keymap_override);
     if (payload_size > sizeof(staged_config.pool.serialized_bytes)) {
         return -ENOSPC;
     }
@@ -373,14 +620,28 @@ int zmk_runtime_config_get_persistable_update(uint32_t update_id, const uint8_t 
         struct runtime_config_persisted_keymap_override destination = {
             .layer_id = source->layer_id,
             .key_position = source->key_position,
-            .behavior_id = source->behavior_id,
-            .param1 = source->param1,
-            .param2 = source->param2,
+            .action = persist_action(&source->action),
         };
 
         memcpy(staged_config.pool.serialized_bytes +
                    sizeof(header) + i * sizeof(destination),
                &destination, sizeof(destination));
+    }
+
+    for (size_t i = 0; i < header.object_count; i++) {
+        const struct zmk_runtime_object_slot *source = &staged_config.pool.objects[i];
+        struct runtime_config_persisted_mod_morph destination = {
+            .id = source->id,
+            .modifiers = source->data.mod_morph.modifiers,
+            .normal_action = persist_action(&source->data.mod_morph.normal_action),
+            .morphed_action = persist_action(&source->data.mod_morph.morphed_action),
+        };
+        size_t offset = sizeof(header) +
+                        header.keymap_override_count *
+                            sizeof(struct runtime_config_persisted_keymap_override) +
+                        i * sizeof(destination);
+
+        memcpy(staged_config.pool.serialized_bytes + offset, &destination, sizeof(destination));
     }
 
     *snapshot_bytes = staged_config.pool.serialized_bytes;
@@ -397,40 +658,37 @@ int zmk_runtime_config_abort_update(uint32_t update_id) {
     return 0;
 }
 
-static int prepare_keymap_overlay(
-    const struct zmk_runtime_keymap_override *overrides, size_t count, uint32_t generation) {
-    if (count > CONFIG_ZMK_RUNTIME_MAX_KEYMAP_OVERRIDES) {
+static int prepare_runtime_config(const struct zmk_runtime_keymap_override *overrides, size_t count,
+                                  const struct zmk_runtime_object_slot *objects, size_t object_count,
+                                  uint32_t generation) {
+    if (count > CONFIG_ZMK_RUNTIME_MAX_KEYMAP_OVERRIDES ||
+        object_count > CONFIG_ZMK_RUNTIME_MAX_OBJECTS) {
         return -ENOSPC;
+    }
+
+    if (validate_objects(objects, object_count) != 0) {
+        return -EINVAL;
     }
 
     memset(&pending_config, 0, sizeof(pending_config));
     pending_config.generation = generation;
     pending_config.keymap_override_count = count;
+    pending_config.object_count = object_count;
+    if (object_count != 0U) {
+        memcpy(pending_config.objects, objects, object_count * sizeof(pending_config.objects[0]));
+    }
 
     for (size_t i = 0; i < count; i++) {
-        const char *behavior_name =
-            zmk_behavior_find_behavior_name_from_local_id(overrides[i].behavior_id);
-
         if (overrides[i].layer_id >= ZMK_KEYMAP_LAYERS_LEN ||
             overrides[i].key_position >= ZMK_KEYMAP_LEN) {
             return -EINVAL;
         }
 
-        if (!behavior_name) {
-            return -ENODEV;
-        }
-
         pending_config.keymap_overrides[i] = overrides[i];
-        pending_config.bindings[i] = (struct zmk_behavior_binding){
-#if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_LOCAL_IDS_IN_BINDINGS)
-            .local_id = overrides[i].behavior_id,
-#endif
-            .behavior_dev = behavior_name,
-            .param1 = overrides[i].param1,
-            .param2 = overrides[i].param2,
-        };
-        if (zmk_behavior_validate_binding(&pending_config.bindings[i]) != 0) {
-            return -EINVAL;
+        int ret = action_to_binding(&overrides[i].action, objects, object_count, true,
+                                    &pending_config.bindings[i]);
+        if (ret != 0) {
+            return ret;
         }
 
         for (size_t previous = 0; previous < i; previous++) {
@@ -451,8 +709,10 @@ int zmk_runtime_config_prepare_pending_update(uint32_t update_id, uint32_t gener
         return -EINVAL;
     }
 
-    return prepare_keymap_overlay(staged_config.pool.keymap_overrides,
-                                  staged_config.pool.keymap_override_count, generation);
+    return prepare_runtime_config(staged_config.pool.keymap_overrides,
+                                  staged_config.pool.keymap_override_count,
+                                  staged_config.pool.objects, staged_config.pool.object_count,
+                                  generation);
 }
 
 int zmk_runtime_config_prepare_persisted_generation(const uint8_t *snapshot_bytes,
@@ -466,10 +726,12 @@ int zmk_runtime_config_prepare_persisted_generation(const uint8_t *snapshot_byte
 
     memcpy(&header, snapshot_bytes, sizeof(header));
     expected_size = sizeof(header) + header.keymap_override_count *
-                                       sizeof(struct runtime_config_persisted_keymap_override);
+                                       sizeof(struct runtime_config_persisted_keymap_override) +
+                    header.object_count * sizeof(struct runtime_config_persisted_mod_morph);
     if (header.magic != RUNTIME_CONFIG_PERSISTED_PAYLOAD_MAGIC ||
         header.version != RUNTIME_CONFIG_PERSISTED_PAYLOAD_VERSION ||
         header.keymap_override_count > CONFIG_ZMK_RUNTIME_MAX_KEYMAP_OVERRIDES ||
+        header.object_count > CONFIG_ZMK_RUNTIME_MAX_OBJECTS ||
         expected_size != snapshot_size) {
         return -EBADMSG;
     }
@@ -481,15 +743,35 @@ int zmk_runtime_config_prepare_persisted_generation(const uint8_t *snapshot_byte
         staged_config.pool.keymap_overrides[i] = (struct zmk_runtime_keymap_override){
             .layer_id = source.layer_id,
             .key_position = source.key_position,
-            .behavior_id = source.behavior_id,
-            .param1 = source.param1,
-            .param2 = source.param2,
+            .action = restore_action(&source.action),
+        };
+    }
+
+    for (size_t i = 0; i < header.object_count; i++) {
+        struct runtime_config_persisted_mod_morph source;
+        size_t offset = sizeof(header) +
+                        header.keymap_override_count *
+                            sizeof(struct runtime_config_persisted_keymap_override) +
+                        i * sizeof(source);
+
+        memcpy(&source, snapshot_bytes + offset, sizeof(source));
+        staged_config.pool.objects[i] = (struct zmk_runtime_object_slot){
+            .id = source.id,
+            .type = ZMK_RUNTIME_OBJECT_TYPE_MOD_MORPH,
+            .data.mod_morph = {
+                .modifiers = source.modifiers,
+                .normal_action = restore_action(&source.normal_action),
+                .morphed_action = restore_action(&source.morphed_action),
+            },
         };
     }
 
     staged_config.pool.keymap_override_count = header.keymap_override_count;
-    return prepare_keymap_overlay(staged_config.pool.keymap_overrides,
-                                  staged_config.pool.keymap_override_count, generation);
+    staged_config.pool.object_count = header.object_count;
+    return prepare_runtime_config(staged_config.pool.keymap_overrides,
+                                  staged_config.pool.keymap_override_count,
+                                  staged_config.pool.objects, staged_config.pool.object_count,
+                                  generation);
 }
 
 int zmk_runtime_config_activate_pending_generation(uint32_t generation) {
@@ -516,6 +798,21 @@ zmk_runtime_config_get_keymap_override(uint8_t layer_id, uint16_t key_position) 
     }
 
     return NULL;
+}
+
+const struct zmk_runtime_object_slot *
+zmk_runtime_config_get_active_object(zmk_runtime_object_id_t object_id) {
+    if (!active_config.present) {
+        return NULL;
+    }
+
+    return find_object(active_config.objects, active_config.object_count, object_id);
+}
+
+int zmk_runtime_config_action_ref_to_binding(const struct zmk_runtime_action_ref *action,
+                                             struct zmk_behavior_binding *binding) {
+    return action_to_binding(action, active_config.objects, active_config.object_count, true,
+                             binding);
 }
 
 size_t zmk_runtime_config_max_update_chunk_bytes(void) {

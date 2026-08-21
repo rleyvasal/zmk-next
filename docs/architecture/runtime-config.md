@@ -103,17 +103,22 @@ is being captured, no hold-tap or tap-dance is undecided, no macro is running,
 and no action retains the old generation. The device reports whether a commit
 is active now or saved pending idle.
 
-The current keymap-overlay milestone tracks the logical active and pending
-generation, raw physical key state, and behavior-engine blocker leases. A
-committed generation contains bounded overrides of compiled behavior bindings;
-the keymap reads an override only after that generation becomes active. The
-firmware serializes those validated overrides into its own private payload
-before A/B Settings persistence, rather than persisting a client protobuf.
+The current milestone tracks the logical active and pending generation, raw
+physical key state, and behavior-engine blocker leases. A committed generation
+contains bounded ActionRef keymap overrides; an ActionRef is either a compiled
+behavior binding or a validated runtime-object ID. The keymap reads an override
+only after its generation becomes active. Firmware serializes that validated
+model into a private payload before A/B Settings persistence, rather than
+persisting a client protobuf.
 
-Version 0.1 currently accepts ordinary bindings and existing compiled layer
-actions with their normal parameters. Layer metadata, runtime object action
-references, and advanced engines remain deliberately unsupported until their
-dispatch and lifecycle implementations exist.
+Version 0.1 accepts ordinary bindings and existing compiled layer actions with
+their normal parameters. It also supports a runtime mod-morph object: on key
+press, the dispatcher resolves its normal or morphed compiled action and saves
+that exact choice in per-key invocation state, so key release cannot be
+affected by modifier changes or a configuration activation. Mod-morph child
+actions are compiled bindings in this increment; runtime-object nesting is
+rejected until the object graph has a complete recursion and lifetime model.
+Layer metadata, macros, combos, hold-taps, and tap-dances remain unsupported.
 
 ## Runtime-editable scope
 
@@ -127,8 +132,8 @@ growth beyond build-time pools are not.
 1. Capability endpoint, complete-snapshot staging, validation, and A/B
    persistence with no live dispatch.
 2. Safe activation and ordinary binding/layer overlay.
-3. Action references and the runtime dispatcher.
-4. Mod-morphs and macros.
+3. Action references, the runtime dispatcher, and mod-morphs.
+4. Macros.
 5. Combos.
 6. Hold-taps and tap-dances after their invocation-lifetime tests are robust.
 

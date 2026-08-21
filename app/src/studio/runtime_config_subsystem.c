@@ -65,12 +65,30 @@ static bool encode_runtime_features(pb_ostream_t *stream, const pb_field_t *fiel
                                     void *const *arg) {
     const uint32_t features[] = {
         zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_KEYMAP_OVERRIDES,
+        zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_MOD_MORPHS,
     };
 
     ARG_UNUSED(arg);
 
     for (size_t i = 0; i < ARRAY_SIZE(features); i++) {
         if (!pb_encode_tag_for_field(stream, field) || !pb_encode_varint(stream, features[i])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool encode_runtime_object_types(pb_ostream_t *stream, const pb_field_t *field,
+                                        void *const *arg) {
+    const uint32_t types[] = {
+        zmk_runtime_config_RuntimeObjectType_RUNTIME_OBJECT_TYPE_MOD_MORPH,
+    };
+
+    ARG_UNUSED(arg);
+
+    for (size_t i = 0; i < ARRAY_SIZE(types); i++) {
+        if (!pb_encode_tag_for_field(stream, field) || !pb_encode_varint(stream, types[i])) {
             return false;
         }
     }
@@ -101,6 +119,7 @@ zmk_studio_Response get_runtime_capabilities(const zmk_studio_Request *req) {
     response.limits.max_layers = ZMK_KEYMAP_LAYERS_LEN;
     response.limits.max_keymap_overrides = capabilities.max_keymap_overrides;
     response.supported_features.funcs.encode = encode_runtime_features;
+    response.supported_object_types.funcs.encode = encode_runtime_object_types;
 
     return RUNTIME_CONFIG_RESPONSE(get_runtime_capabilities, response);
 }
@@ -186,6 +205,7 @@ zmk_studio_Response upload_runtime_update_chunk(const zmk_studio_Request *req) {
 struct snapshot_decode_context {
     uint32_t update_id;
     uint16_t keymap_override_count;
+    uint16_t object_count;
     int error;
     bool unsupported_content;
 };
@@ -200,11 +220,49 @@ static bool reject_snapshot_content(pb_istream_t *stream, const pb_field_t *fiel
     return false;
 }
 
+static int decode_action_reference(const zmk_runtime_config_ActionReference *wire_action,
+                                   bool allow_runtime_object,
+                                   struct zmk_runtime_action_ref *action) {
+    if (!wire_action || !action) {
+        return -EINVAL;
+    }
+
+    if (wire_action->which_target ==
+        zmk_runtime_config_ActionReference_compiled_behavior_tag) {
+        if (wire_action->target.compiled_behavior.behavior_id == 0U ||
+            wire_action->target.compiled_behavior.behavior_id > UINT16_MAX) {
+            return -EINVAL;
+        }
+
+        *action = (struct zmk_runtime_action_ref){
+            .kind = ZMK_RUNTIME_ACTION_COMPILED_BEHAVIOR,
+            .data.compiled = {
+                .local_id = wire_action->target.compiled_behavior.behavior_id,
+                .param1 = wire_action->target.compiled_behavior.param1,
+                .param2 = wire_action->target.compiled_behavior.param2,
+            },
+        };
+        return 0;
+    }
+
+    if (allow_runtime_object &&
+        wire_action->which_target == zmk_runtime_config_ActionReference_runtime_object_id_tag &&
+        wire_action->target.runtime_object_id != ZMK_RUNTIME_OBJECT_ID_INVALID) {
+        *action = (struct zmk_runtime_action_ref){
+            .kind = ZMK_RUNTIME_ACTION_OBJECT,
+            .data.object_id = wire_action->target.runtime_object_id,
+        };
+        return 0;
+    }
+
+    return -EINVAL;
+}
+
 static bool decode_keymap_override(pb_istream_t *stream, const pb_field_t *field, void **arg) {
     struct snapshot_decode_context *context = *arg;
     zmk_runtime_config_KeymapOverride wire_override =
         zmk_runtime_config_KeymapOverride_init_zero;
-    struct zmk_runtime_keymap_override override;
+    struct zmk_runtime_keymap_override override = {0};
     int ret;
 
     ARG_UNUSED(field);
@@ -213,22 +271,16 @@ static bool decode_keymap_override(pb_istream_t *stream, const pb_field_t *field
         return false;
     }
 
-    if (!wire_override.has_action ||
-        wire_override.action.which_target !=
-            zmk_runtime_config_ActionReference_compiled_behavior_tag ||
-        wire_override.layer_id > UINT8_MAX || wire_override.key_position > UINT16_MAX ||
-        wire_override.action.target.compiled_behavior.behavior_id > UINT16_MAX) {
+    override.layer_id = wire_override.layer_id;
+    override.key_position = wire_override.key_position;
+
+    if (!wire_override.has_action || wire_override.layer_id > UINT8_MAX ||
+        wire_override.key_position > UINT16_MAX ||
+        decode_action_reference(&wire_override.action, true, &override.action) != 0) {
         context->error = -EINVAL;
         return false;
     }
 
-    override = (struct zmk_runtime_keymap_override){
-        .layer_id = wire_override.layer_id,
-        .key_position = wire_override.key_position,
-        .behavior_id = wire_override.action.target.compiled_behavior.behavior_id,
-        .param1 = wire_override.action.target.compiled_behavior.param1,
-        .param2 = wire_override.action.target.compiled_behavior.param2,
-    };
     ret = zmk_runtime_config_append_staged_keymap_override(context->update_id, &override);
     if (ret != 0) {
         context->error = ret;
@@ -236,6 +288,45 @@ static bool decode_keymap_override(pb_istream_t *stream, const pb_field_t *field
     }
 
     context->keymap_override_count++;
+    return true;
+}
+
+static bool decode_runtime_object(pb_istream_t *stream, const pb_field_t *field, void **arg) {
+    struct snapshot_decode_context *context = *arg;
+    zmk_runtime_config_RuntimeObject wire_object = zmk_runtime_config_RuntimeObject_init_zero;
+    struct zmk_runtime_object_slot object = {0};
+    int ret;
+    ARG_UNUSED(field);
+
+    if (!pb_decode(stream, &zmk_runtime_config_RuntimeObject_msg, &wire_object)) {
+        return false;
+    }
+
+    if (wire_object.id == ZMK_RUNTIME_OBJECT_ID_INVALID ||
+        wire_object.which_definition != zmk_runtime_config_RuntimeObject_mod_morph_tag ||
+        !wire_object.definition.mod_morph.has_normal_action ||
+        !wire_object.definition.mod_morph.has_morphed_action ||
+        decode_action_reference(&wire_object.definition.mod_morph.normal_action, false,
+                                &object.data.mod_morph.normal_action) != 0 ||
+        decode_action_reference(&wire_object.definition.mod_morph.morphed_action, false,
+                                &object.data.mod_morph.morphed_action) != 0) {
+        context->error = wire_object.which_definition ==
+                                 zmk_runtime_config_RuntimeObject_mod_morph_tag
+                             ? -EINVAL
+                             : -ENOTSUP;
+        return false;
+    }
+
+    object.id = wire_object.id;
+    object.type = ZMK_RUNTIME_OBJECT_TYPE_MOD_MORPH;
+    object.data.mod_morph.modifiers = wire_object.definition.mod_morph.modifiers;
+    ret = zmk_runtime_config_append_staged_object(context->update_id, &object);
+    if (ret != 0) {
+        context->error = ret;
+        return false;
+    }
+
+    context->object_count++;
     return true;
 }
 
@@ -258,12 +349,17 @@ static int decode_uploaded_snapshot(uint32_t update_id,
         return ret;
     }
 
+    ret = zmk_runtime_config_set_staged_objects(update_id, NULL, 0U);
+    if (ret != 0) {
+        return ret;
+    }
+
     context.update_id = update_id;
     wire_snapshot.keymap_overrides.funcs.decode = decode_keymap_override;
     wire_snapshot.keymap_overrides.arg = &context;
     wire_snapshot.layers.funcs.decode = reject_snapshot_content;
     wire_snapshot.layers.arg = &context;
-    wire_snapshot.runtime_objects.funcs.decode = reject_snapshot_content;
+    wire_snapshot.runtime_objects.funcs.decode = decode_runtime_object;
     wire_snapshot.runtime_objects.arg = &context;
     wire_snapshot.combos.funcs.decode = reject_snapshot_content;
     wire_snapshot.combos.arg = &context;
@@ -292,6 +388,7 @@ static int decode_uploaded_snapshot(uint32_t update_id,
     snapshot->persistence_schema_version = wire_snapshot.persistence_schema_version;
     snapshot->generation = wire_snapshot.generation;
     snapshot->keymap_override_count = context.keymap_override_count;
+    snapshot->object_count = context.object_count;
     memcpy(snapshot->capability_fingerprint, wire_snapshot.capability_fingerprint.bytes,
            sizeof(snapshot->capability_fingerprint));
 
@@ -341,6 +438,10 @@ zmk_studio_Response validate_runtime_update(const zmk_studio_Request *req) {
     if (ret == 0) {
         ret =
             zmk_runtime_config_stage_uploaded_snapshot(request->update_id, &snapshot, &validation);
+    }
+
+    if (ret == 0) {
+        ret = zmk_runtime_config_get_persistable_update_size(request->update_id, &serialized_size);
     }
 
     set_resource_usage(&response, ret == 0 ? &snapshot : NULL, serialized_size);

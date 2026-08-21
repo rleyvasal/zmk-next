@@ -11,9 +11,10 @@
 
 #include <zmk/behavior.h>
 
-#define ZMK_RUNTIME_CONFIG_PERSISTENCE_SCHEMA_VERSION 1U
+#define ZMK_RUNTIME_CONFIG_PERSISTENCE_SCHEMA_VERSION 2U
 #define ZMK_RUNTIME_CAPABILITY_FINGERPRINT_SIZE 16U
 #define ZMK_RUNTIME_OBJECT_ID_INVALID 0U
+#define ZMK_RUNTIME_DISPATCH_BEHAVIOR_NAME "runtime_object"
 
 typedef uint32_t zmk_runtime_object_id_t;
 
@@ -43,9 +44,18 @@ struct zmk_runtime_action_ref {
     } data;
 };
 
+struct zmk_runtime_mod_morph_config {
+    uint32_t modifiers;
+    struct zmk_runtime_action_ref normal_action;
+    struct zmk_runtime_action_ref morphed_action;
+};
+
 struct zmk_runtime_object_slot {
     zmk_runtime_object_id_t id;
     enum zmk_runtime_object_type type;
+    union {
+        struct zmk_runtime_mod_morph_config mod_morph;
+    } data;
 };
 
 struct zmk_runtime_combo_slot {
@@ -58,9 +68,7 @@ struct zmk_runtime_combo_slot {
 struct zmk_runtime_keymap_override {
     uint8_t layer_id;
     uint16_t key_position;
-    zmk_behavior_local_id_t behavior_id;
-    uint32_t param1;
-    uint32_t param2;
+    struct zmk_runtime_action_ref action;
 };
 
 enum zmk_runtime_macro_step_type {
@@ -94,6 +102,7 @@ struct zmk_runtime_config_pool {
     uint16_t keymap_override_count;
     struct zmk_runtime_keymap_override
         keymap_overrides[CONFIG_ZMK_RUNTIME_MAX_KEYMAP_OVERRIDES];
+    uint16_t object_count;
     struct zmk_runtime_object_slot objects[CONFIG_ZMK_RUNTIME_MAX_OBJECTS];
     struct zmk_runtime_combo_slot combos[CONFIG_ZMK_RUNTIME_MAX_COMBOS];
     struct zmk_runtime_macro_step macro_steps[CONFIG_ZMK_RUNTIME_MAX_MACRO_STEPS];
@@ -160,11 +169,17 @@ int zmk_runtime_config_set_staged_keymap_overrides(
     uint32_t update_id, const struct zmk_runtime_keymap_override *overrides, size_t count);
 int zmk_runtime_config_append_staged_keymap_override(
     uint32_t update_id, const struct zmk_runtime_keymap_override *override);
+int zmk_runtime_config_set_staged_objects(uint32_t update_id,
+                                          const struct zmk_runtime_object_slot *objects,
+                                          size_t count);
+int zmk_runtime_config_append_staged_object(uint32_t update_id,
+                                            const struct zmk_runtime_object_slot *object);
 int zmk_runtime_config_get_validated_uploaded_snapshot(uint32_t update_id,
                                                        const uint8_t **snapshot_bytes,
                                                        size_t *snapshot_size);
 int zmk_runtime_config_get_persistable_update(uint32_t update_id, const uint8_t **snapshot_bytes,
                                               size_t *snapshot_size);
+int zmk_runtime_config_get_persistable_update_size(uint32_t update_id, size_t *snapshot_size);
 int zmk_runtime_config_abort_update(uint32_t update_id);
 size_t zmk_runtime_config_max_update_chunk_bytes(void);
 
@@ -174,6 +189,10 @@ int zmk_runtime_config_prepare_persisted_generation(const uint8_t *snapshot_byte
 int zmk_runtime_config_activate_pending_generation(uint32_t generation);
 const struct zmk_behavior_binding *
 zmk_runtime_config_get_keymap_override(uint8_t layer_id, uint16_t key_position);
+const struct zmk_runtime_object_slot *
+zmk_runtime_config_get_active_object(zmk_runtime_object_id_t object_id);
+int zmk_runtime_config_action_ref_to_binding(const struct zmk_runtime_action_ref *action,
+                                             struct zmk_behavior_binding *binding);
 
 int zmk_runtime_config_persist_update(uint32_t update_id, uint32_t *generation);
 int zmk_runtime_config_get_persisted_snapshot(const uint8_t **snapshot_bytes, size_t *snapshot_size,
