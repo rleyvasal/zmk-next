@@ -129,12 +129,14 @@ static void select_newest_valid_slot(void) {
 
     runtime_config_settings.selected_slot = newest_slot;
     runtime_config_settings.status.has_persisted_snapshot = newest_slot >= 0;
-    runtime_config_settings.status.pending_generation =
+    runtime_config_settings.status.persisted_generation =
         newest_slot >= 0 ? runtime_config_settings.slots[newest_slot].manifest.generation : 0U;
 
     if (newest_slot >= 0) {
         LOG_INF("Selected Runtime Config generation %u from slot %s",
-                runtime_config_settings.status.pending_generation, slot_name(newest_slot));
+                runtime_config_settings.status.persisted_generation, slot_name(newest_slot));
+        (void)zmk_runtime_config_request_activation(
+            runtime_config_settings.status.persisted_generation);
     } else {
         LOG_INF("No valid persisted Runtime Config snapshot found");
     }
@@ -300,7 +302,7 @@ int zmk_runtime_config_persist_update(uint32_t update_id, uint32_t *generation) 
     manifest.magic = RUNTIME_CONFIG_SETTINGS_MANIFEST_MAGIC;
     manifest.manifest_version = RUNTIME_CONFIG_SETTINGS_MANIFEST_VERSION;
     manifest.persistence_schema_version = ZMK_RUNTIME_CONFIG_PERSISTENCE_SCHEMA_VERSION;
-    manifest.generation = runtime_config_settings.status.pending_generation + 1U;
+    manifest.generation = runtime_config_settings.status.persisted_generation + 1U;
     if (manifest.generation == 0U) {
         manifest.generation = 1U;
     }
@@ -326,8 +328,13 @@ int zmk_runtime_config_persist_update(uint32_t update_id, uint32_t *generation) 
     cache_committed_slot(slot, payload, payload_size, &manifest);
     runtime_config_settings.selected_slot = slot;
     runtime_config_settings.status.has_persisted_snapshot = true;
-    runtime_config_settings.status.pending_generation = manifest.generation;
+    runtime_config_settings.status.persisted_generation = manifest.generation;
     *generation = manifest.generation;
+
+    ret = zmk_runtime_config_request_activation(manifest.generation);
+    if (ret != 0) {
+        return ret;
+    }
 
     return zmk_runtime_config_abort_update(update_id);
 }

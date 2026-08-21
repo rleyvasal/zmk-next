@@ -116,7 +116,14 @@ struct zmk_runtime_config_validation_result {
 
 struct zmk_runtime_config_persistence_status {
     bool has_persisted_snapshot;
+    uint32_t persisted_generation;
+};
+
+struct zmk_runtime_config_activation_status {
+    uint32_t active_generation;
     uint32_t pending_generation;
+    uint16_t pressed_key_count;
+    uint16_t blocker_count;
 };
 
 void zmk_runtime_config_get_capabilities(struct zmk_runtime_capabilities *capabilities);
@@ -148,3 +155,16 @@ int zmk_runtime_config_get_persisted_snapshot(const uint8_t **snapshot_bytes, si
                                               uint32_t *generation);
 void zmk_runtime_config_get_persistence_status(
     struct zmk_runtime_config_persistence_status *status);
+
+/*
+ * A persisted generation is activated only after the physical key state and all
+ * registered runtime behavior engines are idle. Runtime engines retain a
+ * blocker for the lifetime of any invocation that could still release an
+ * action from the active generation.
+ */
+int zmk_runtime_config_request_activation(uint32_t generation);
+int zmk_runtime_config_note_key_state(uint32_t position, bool pressed);
+int zmk_runtime_config_activation_blocker_acquire(void);
+int zmk_runtime_config_activation_blocker_release(void);
+void zmk_runtime_config_get_activation_status(
+    struct zmk_runtime_config_activation_status *status);

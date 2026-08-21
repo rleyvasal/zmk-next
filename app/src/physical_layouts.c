@@ -21,6 +21,9 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include <zmk/matrix.h>
 #include <zmk/physical_layouts.h>
+#if IS_ENABLED(CONFIG_ZMK_RUNTIME_CONFIG)
+#include <zmk/runtime_config.h>
+#endif
 #include <zmk/event_manager.h>
 #include <zmk/events/position_state_changed.h>
 
@@ -294,6 +297,9 @@ static void zmk_physical_layouts_kscan_process_msgq(struct k_work *item) {
 
         LOG_DBG("Row: %d, col: %d, position: %d, pressed: %s", ev.row, ev.column, position,
                 (pressed ? "true" : "false"));
+#if IS_ENABLED(CONFIG_ZMK_RUNTIME_CONFIG)
+        (void)zmk_runtime_config_note_key_state(position, pressed);
+#endif
         raise_zmk_position_state_changed(
             (struct zmk_position_state_changed){.source = ZMK_POSITION_STATE_CHANGE_SOURCE_LOCAL,
                                                 .state = pressed,

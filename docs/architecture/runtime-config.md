@@ -103,6 +103,11 @@ is being captured, no hold-tap or tap-dance is undecided, no macro is running,
 and no action retains the old generation. The device reports whether a commit
 is active now or saved pending idle.
 
+The current safe-activation milestone tracks the logical active and pending
+generation, raw physical key state, and behavior-engine blocker leases. It
+does not yet change bindings at activation time: the following keymap-overlay
+and runtime-dispatch phases will consume the active generation.
+
 ## Runtime-editable scope
 
 Once their engines are implemented, ordinary key bindings, layer actions and

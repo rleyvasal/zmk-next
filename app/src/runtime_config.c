@@ -93,12 +93,14 @@ const struct zmk_runtime_config_snapshot *zmk_runtime_config_staged_snapshot(voi
 
 int zmk_runtime_config_begin_update(uint32_t expected_active_generation, size_t snapshot_size,
                                     uint32_t *update_id) {
+    struct zmk_runtime_config_activation_status activation;
+
     if (!update_id || snapshot_size == 0U) {
         return -EINVAL;
     }
 
-    /* Phase 0 has no persistent active generation; zero accepts that initial state. */
-    if (expected_active_generation != 0U) {
+    zmk_runtime_config_get_activation_status(&activation);
+    if (expected_active_generation != activation.active_generation) {
         return -ESTALE;
     }
 

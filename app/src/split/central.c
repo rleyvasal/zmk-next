@@ -11,6 +11,9 @@
 #include <zmk/split/central.h>
 #include <zmk/hid_indicators_types.h>
 #include <zmk/pointing/input_split.h>
+#if IS_ENABLED(CONFIG_ZMK_RUNTIME_CONFIG)
+#include <zmk/runtime_config.h>
+#endif
 
 #include <zephyr/logging/log.h>
 
@@ -44,6 +47,9 @@ int zmk_split_transport_central_peripheral_event_handler(
                                                           ev.data.key_position_event.position,
                                                       .state = ev.data.key_position_event.pressed,
                                                       .timestamp = k_uptime_get()};
+#if IS_ENABLED(CONFIG_ZMK_RUNTIME_CONFIG)
+        (void)zmk_runtime_config_note_key_state(state_ev.position, state_ev.state);
+#endif
         return raise_zmk_position_state_changed(state_ev);
     }
 #if IS_ENABLED(CONFIG_ZMK_INPUT_SPLIT)

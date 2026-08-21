@@ -82,15 +82,15 @@ zmk_studio_Response get_runtime_capabilities(const zmk_studio_Request *req) {
 }
 
 static void populate_status(zmk_runtime_config_RuntimeConfigStatus *status) {
-    struct zmk_runtime_config_persistence_status persistence;
+    struct zmk_runtime_config_activation_status activation;
 
-    zmk_runtime_config_get_persistence_status(&persistence);
+    zmk_runtime_config_get_activation_status(&activation);
     status->state =
-        persistence.has_persisted_snapshot
+        activation.pending_generation != 0U
             ? zmk_runtime_config_RuntimeConfigState_RUNTIME_CONFIG_STATE_PERSISTED_PENDING_IDLE
             : zmk_runtime_config_RuntimeConfigState_RUNTIME_CONFIG_STATE_ACTIVE;
-    status->active_generation = 0U;
-    status->pending_generation = persistence.pending_generation;
+    status->active_generation = activation.active_generation;
+    status->pending_generation = activation.pending_generation;
 }
 
 zmk_studio_Response get_runtime_config_status(const zmk_studio_Request *req) {
@@ -294,10 +294,12 @@ zmk_studio_Response commit_runtime_update(const zmk_studio_Request *req) {
     }
 
     response.saved = true;
-    response.activation =
-        zmk_runtime_config_RuntimeConfigActivation_RUNTIME_CONFIG_ACTIVATION_PENDING_IDLE;
     response.has_status = true;
     populate_status(&response.status);
+    response.activation =
+        response.status.pending_generation != 0U
+            ? zmk_runtime_config_RuntimeConfigActivation_RUNTIME_CONFIG_ACTIVATION_PENDING_IDLE
+            : zmk_runtime_config_RuntimeConfigActivation_RUNTIME_CONFIG_ACTIVATION_ACTIVE;
     return RUNTIME_CONFIG_RESPONSE(commit_runtime_update, response);
 }
 
