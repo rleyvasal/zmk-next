@@ -1,7 +1,7 @@
 # ZMK Next
 
 ZMK Next is a firmware runtime-configuration platform built on ZMK's hardware,
-transport, and behavior foundations. It makes supported behavior *instances*
+transport, and behavior foundations. It makes supported behavior _instances_
 live-configurable while retaining compiled firmware engines and fixed resource
 budgets.
 

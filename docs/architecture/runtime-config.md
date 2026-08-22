@@ -26,16 +26,16 @@ engines.
 
 ## Terminology
 
-| Term | Meaning |
-| --- | --- |
-| Capability | A feature or limit compiled into a firmware build. |
-| Runtime object | A user-defined instance of a compiled engine, such as a macro, hold-tap, tap-dance, or mod-morph. |
-| Action reference | A compiled behavior plus parameters, or a stable runtime-object ID. |
-| Snapshot | One complete serializable runtime configuration. |
-| Generation | One validated version of a snapshot. |
-| Draft | Client-side or firmware-staged configuration that is not active. |
-| Active configuration | Immutable generation used for key processing. |
-| Pending configuration | Persisted valid generation waiting for keyboard-safe activation. |
+| Term                  | Meaning                                                                                           |
+| --------------------- | ------------------------------------------------------------------------------------------------- |
+| Capability            | A feature or limit compiled into a firmware build.                                                |
+| Runtime object        | A user-defined instance of a compiled engine, such as a macro, hold-tap, tap-dance, or mod-morph. |
+| Action reference      | A compiled behavior plus parameters, or a stable runtime-object ID.                               |
+| Snapshot              | One complete serializable runtime configuration.                                                  |
+| Generation            | One validated version of a snapshot.                                                              |
+| Draft                 | Client-side or firmware-staged configuration that is not active.                                  |
+| Active configuration  | Immutable generation used for key processing.                                                     |
+| Pending configuration | Persisted valid generation waiting for keyboard-safe activation.                                  |
 
 Conceptually, a snapshot contains:
 
@@ -71,11 +71,11 @@ it never writes Zephyr Settings directly.
 
 Three versions are independent:
 
-| Version | Meaning |
-| --- | --- |
-| Protocol version | Firmware and configurator RPC compatibility. |
-| Persistence schema version | Firmware load/migration compatibility for saved snapshots. |
-| Capability fingerprint | Whether this firmware build supports the requested types, parameters, and limits. |
+| Version                    | Meaning                                                                           |
+| -------------------------- | --------------------------------------------------------------------------------- |
+| Protocol version           | Firmware and configurator RPC compatibility.                                      |
+| Persistence schema version | Firmware load/migration compatibility for saved snapshots.                        |
+| Capability fingerprint     | Whether this firmware build supports the requested types, parameters, and limits. |
 
 On connection, the configurator reads the protocol version, persistence schema
 version, capability fingerprint, enabled object types, resource limits, active
