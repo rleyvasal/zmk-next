@@ -16,7 +16,8 @@
 #if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
 static const struct behavior_parameter_value_metadata param_values[] = {{
     .display_name = "Runtime object ID",
-    .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
+    .type = BEHAVIOR_PARAMETER_VALUE_TYPE_RANGE,
+    .range = {.min = 1, .max = CONFIG_ZMK_RUNTIME_MAX_OBJECTS},
 }};
 
 static const struct behavior_parameter_metadata_set param_metadata_set[] = {{

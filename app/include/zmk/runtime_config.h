@@ -106,6 +106,7 @@ struct zmk_runtime_combo_slot {
     bool slow_release;
     uint16_t positions[CONFIG_ZMK_RUNTIME_MAX_COMBO_KEYS];
     struct zmk_runtime_action_ref output;
+    uint32_t layer_mask;
 };
 
 struct zmk_runtime_keymap_override {
@@ -198,6 +199,8 @@ struct zmk_runtime_config_activation_status {
 };
 
 void zmk_runtime_config_get_capabilities(struct zmk_runtime_capabilities *capabilities);
+void zmk_runtime_config_clear_last_reason(void);
+const char *zmk_runtime_config_last_reason(void);
 void zmk_runtime_config_init_empty_snapshot(struct zmk_runtime_config_snapshot *snapshot);
 int zmk_runtime_config_validate_snapshot(const struct zmk_runtime_config_snapshot *snapshot,
                                          struct zmk_runtime_config_validation_result *result);

@@ -23,10 +23,47 @@ ZMK_RPC_SUBSYSTEM(runtime_config)
 
 #define RUNTIME_CONFIG_RESPONSE(type, ...) ZMK_RPC_RESPONSE(runtime_config, type, __VA_ARGS__)
 
+static char rpc_error_detail[120];
+
+static bool encode_rpc_error_message(pb_ostream_t *stream, const pb_field_t *field,
+                                     void *const *arg) {
+    const char *text = *arg;
+
+    if (!text || !text[0]) {
+        text = rpc_error_detail;
+    }
+    if (!text || !text[0]) {
+        return true;
+    }
+    return pb_encode_tag_for_field(stream, field) &&
+           pb_encode_string(stream, (const pb_byte_t *)text, strlen(text));
+}
+
+static void set_rpc_error_detail(const char *text) {
+    if (!text) {
+        rpc_error_detail[0] = '\0';
+        return;
+    }
+    strncpy(rpc_error_detail, text, sizeof(rpc_error_detail) - 1U);
+    rpc_error_detail[sizeof(rpc_error_detail) - 1U] = '\0';
+}
+
 static void set_error(zmk_studio_Response *response,
                       zmk_runtime_config_RuntimeConfigErrorCode code) {
+    const char *reason = zmk_runtime_config_last_reason();
+
+    if (!rpc_error_detail[0] && reason && reason[0]) {
+        set_rpc_error_detail(reason);
+    }
     response->type.request_response.subsystem.runtime_config.has_error = true;
     response->type.request_response.subsystem.runtime_config.error.code = code;
+    if (rpc_error_detail[0]) {
+        response->type.request_response.subsystem.runtime_config.error.message.funcs.encode =
+            encode_rpc_error_message;
+        response->type.request_response.subsystem.runtime_config.error.message.arg =
+            rpc_error_detail;
+        LOG_WRN("runtime config error %d: %s", (int)code, rpc_error_detail);
+    }
 }
 
 static zmk_runtime_config_RuntimeConfigErrorCode error_from_errno(int error) {
@@ -434,6 +471,7 @@ static bool encode_combos(pb_ostream_t *stream, const pb_field_t *field, void *c
         wire_combo.timeout_ms = combo->timeout_ms;
         wire_combo.slow_release = combo->slow_release;
         wire_combo.require_prior_idle_ms = combo->require_prior_idle_ms;
+        wire_combo.layer_mask = combo->layer_mask;
         wire_combo.has_output = true;
         wire_combo.key_positions.funcs.encode = encode_combo_positions;
         wire_combo.key_positions.arg = (void *)combo;
@@ -896,13 +934,17 @@ static bool decode_combo_position(pb_istream_t *stream, const pb_field_t *field,
 
     ARG_UNUSED(field);
 
+    /* Nanopb packed repeated callbacks are invoked once per value. Packed
+     * wire is a length-delimited blob; nanopb loops this callback until the
+     * blob is consumed. Read exactly one varint per call. */
     if (!pb_decode_varint(stream, &position) || position > UINT16_MAX ||
         context->combo.key_count >= CONFIG_ZMK_RUNTIME_MAX_COMBO_KEYS) {
         context->error = -EINVAL;
+        set_rpc_error_detail("combo key position is invalid");
         return false;
     }
 
-    context->combo.positions[context->combo.key_count++] = position;
+    context->combo.positions[context->combo.key_count++] = (uint16_t)position;
     return true;
 }
 
@@ -919,12 +961,22 @@ static bool decode_combo_definition(pb_istream_t *stream, const pb_field_t *fiel
     wire_combo.key_positions.arg = &combo_context;
     if (!pb_decode(stream, &zmk_runtime_config_ComboDefinition_msg, &wire_combo)) {
         snapshot_context->error = combo_context.error != 0 ? combo_context.error : -EBADMSG;
+        if (!rpc_error_detail[0]) {
+            set_rpc_error_detail("combo protobuf decode failed");
+        }
         return false;
     }
 
     if (wire_combo.id == ZMK_RUNTIME_OBJECT_ID_INVALID || !wire_combo.has_output ||
         decode_action_reference(&wire_combo.output, true, &combo_context.combo.output) != 0) {
         snapshot_context->error = -EINVAL;
+        set_rpc_error_detail("combo output is missing or invalid");
+        return false;
+    }
+
+    if (combo_context.combo.key_count == 0U) {
+        snapshot_context->error = -EINVAL;
+        set_rpc_error_detail("combo has no key positions");
         return false;
     }
 
@@ -932,6 +984,7 @@ static bool decode_combo_definition(pb_istream_t *stream, const pb_field_t *fiel
     combo_context.combo.timeout_ms = wire_combo.timeout_ms;
     combo_context.combo.require_prior_idle_ms = wire_combo.require_prior_idle_ms;
     combo_context.combo.slow_release = wire_combo.slow_release;
+    combo_context.combo.layer_mask = wire_combo.layer_mask;
     ret = zmk_runtime_config_append_staged_combo(snapshot_context->update_id,
                                                  &combo_context.combo);
     if (ret != 0) {
@@ -1000,6 +1053,7 @@ static int decode_uploaded_snapshot(uint32_t update_id,
     }
 
     if (wire_snapshot.generation != 0U) {
+        set_rpc_error_detail("uploaded snapshot generation must be 0");
         return -EINVAL;
     }
 
@@ -1058,6 +1112,9 @@ zmk_studio_Response validate_runtime_update(const zmk_studio_Request *req) {
     const uint8_t *serialized_snapshot;
     size_t serialized_size = 0U;
     int ret;
+
+    rpc_error_detail[0] = '\0';
+    zmk_runtime_config_clear_last_reason();
 
     ret = zmk_runtime_config_get_uploaded_snapshot(request->update_id, &serialized_snapshot,
                                                    &serialized_size);

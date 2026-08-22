@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <string.h>
 
+#include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
 
 #include <drivers/behavior.h>
@@ -15,6 +16,26 @@
 #include <zmk/runtime_config.h>
 
 void zmk_combo_runtime_config_refresh(void);
+
+static char last_reason[120];
+
+void zmk_runtime_config_clear_last_reason(void) {
+    last_reason[0] = '\0';
+}
+
+const char *zmk_runtime_config_last_reason(void) {
+    return last_reason;
+}
+
+static void set_last_reason(const char *text) {
+    if (!text) {
+        last_reason[0] = '\0';
+        return;
+    }
+
+    strncpy(last_reason, text, sizeof(last_reason) - 1U);
+    last_reason[sizeof(last_reason) - 1U] = '\0';
+}
 
 static struct {
     bool present;
@@ -49,7 +70,8 @@ static struct {
 } pending_config, active_config;
 
 #define RUNTIME_CONFIG_PERSISTED_PAYLOAD_MAGIC 0x5A4E4B4FU
-#define RUNTIME_CONFIG_PERSISTED_PAYLOAD_VERSION 6U
+#define RUNTIME_CONFIG_PERSISTED_PAYLOAD_VERSION_V6 6U
+#define RUNTIME_CONFIG_PERSISTED_PAYLOAD_VERSION 7U
 
 struct runtime_config_persisted_payload_header {
     uint32_t magic;
@@ -112,6 +134,16 @@ struct runtime_config_persisted_object {
     } data;
 } __packed;
 
+struct runtime_config_persisted_combo_v6 {
+    zmk_runtime_object_id_t id;
+    uint8_t key_count;
+    uint32_t timeout_ms;
+    uint32_t require_prior_idle_ms;
+    bool slow_release;
+    uint16_t positions[CONFIG_ZMK_RUNTIME_MAX_COMBO_KEYS];
+    struct runtime_config_persisted_action_ref output;
+} __packed;
+
 struct runtime_config_persisted_combo {
     zmk_runtime_object_id_t id;
     uint8_t key_count;
@@ -120,6 +152,7 @@ struct runtime_config_persisted_combo {
     bool slow_release;
     uint16_t positions[CONFIG_ZMK_RUNTIME_MAX_COMBO_KEYS];
     struct runtime_config_persisted_action_ref output;
+    uint32_t layer_mask;
 } __packed;
 
 struct runtime_config_persisted_macro_step {
@@ -134,6 +167,21 @@ struct runtime_config_persisted_tap_dance_action {
     struct runtime_config_persisted_action_ref tap_action;
     struct runtime_config_persisted_action_ref hold_action;
 } __packed;
+
+static size_t persisted_combo_size(uint16_t version) {
+    return version >= RUNTIME_CONFIG_PERSISTED_PAYLOAD_VERSION
+               ? sizeof(struct runtime_config_persisted_combo)
+               : sizeof(struct runtime_config_persisted_combo_v6);
+}
+
+static size_t persisted_payload_size(const struct runtime_config_persisted_payload_header *header) {
+    return sizeof(*header) +
+           header->keymap_override_count * sizeof(struct runtime_config_persisted_keymap_override) +
+           header->object_count * sizeof(struct runtime_config_persisted_object) +
+           header->combo_count * persisted_combo_size(header->version) +
+           header->macro_step_count * sizeof(struct runtime_config_persisted_macro_step) +
+           header->tap_dance_action_count * sizeof(struct runtime_config_persisted_tap_dance_action);
+}
 
 static void
 fill_capability_fingerprint(uint8_t fingerprint[ZMK_RUNTIME_CAPABILITY_FINGERPRINT_SIZE]) {
@@ -252,6 +300,9 @@ static int object_action_to_binding(zmk_runtime_object_id_t object_id,
         .param1 = object_id,
     };
 
+    /* Object IDs are runtime-config identities, not HID/constants. The
+     * dispatch behavior metadata must accept the ID range; still validate so
+     * a misconfigured &rt binding cannot be staged. */
     return zmk_behavior_validate_binding(binding);
 }
 
@@ -374,6 +425,7 @@ static int validate_object(const struct zmk_runtime_object_slot *object,
     struct zmk_behavior_binding binding;
 
     if (!object || object->id == ZMK_RUNTIME_OBJECT_ID_INVALID) {
+        set_last_reason("runtime object id is 0");
         return -EINVAL;
     }
 
@@ -393,11 +445,13 @@ static int validate_object(const struct zmk_runtime_object_slot *object,
 
         if (!macro_steps || count == 0U || offset > macro_step_count ||
             count > macro_step_count - offset) {
+            set_last_reason("macro has no valid steps");
             return -EINVAL;
         }
 
         for (size_t i = 0; i < count; i++) {
             if (validate_macro_step(&macro_steps[offset + i]) != 0) {
+                set_last_reason("macro step is not a valid compiled action");
                 return -EINVAL;
             }
         }
@@ -525,20 +579,45 @@ static int validate_combo(const struct zmk_runtime_combo_slot *combo,
                           const struct zmk_runtime_object_slot *objects, size_t object_count) {
     struct zmk_behavior_binding binding;
 
-    if (!combo || combo->id == ZMK_RUNTIME_OBJECT_ID_INVALID || combo->key_count == 0U ||
-        combo->key_count > CONFIG_ZMK_RUNTIME_MAX_COMBO_KEYS || combo->timeout_ms == 0U ||
-        combo->timeout_ms > INT32_MAX || combo->require_prior_idle_ms > INT32_MAX ||
-        action_to_binding(&combo->output, objects, object_count, true, &binding) != 0) {
+    if (!combo) {
+        set_last_reason("combo is missing");
+        return -EINVAL;
+    }
+    if (combo->id == ZMK_RUNTIME_OBJECT_ID_INVALID) {
+        set_last_reason("combo id is 0");
+        return -EINVAL;
+    }
+    if (combo->key_count == 0U) {
+        set_last_reason("combo has no key positions");
+        return -EINVAL;
+    }
+    if (combo->key_count > CONFIG_ZMK_RUNTIME_MAX_COMBO_KEYS) {
+        set_last_reason("combo has too many keys");
+        return -EINVAL;
+    }
+    if (combo->timeout_ms == 0U) {
+        set_last_reason("combo timeout is 0");
+        return -EINVAL;
+    }
+    if (combo->timeout_ms > INT32_MAX || combo->require_prior_idle_ms > INT32_MAX) {
+        set_last_reason("combo timing is out of range");
+        return -EINVAL;
+    }
+    if (action_to_binding(&combo->output, objects, object_count, true, &binding) != 0) {
+        set_last_reason("combo output is not a valid action");
         return -EINVAL;
     }
 
     for (size_t i = 0; i < combo->key_count; i++) {
         if (combo->positions[i] >= ZMK_KEYMAP_LEN) {
+            snprintk(last_reason, sizeof(last_reason), "combo position %u is out of range",
+                     combo->positions[i]);
             return -EINVAL;
         }
 
         for (size_t previous = 0; previous < i; previous++) {
             if (combo->positions[previous] == combo->positions[i]) {
+                set_last_reason("combo has duplicate key positions");
                 return -EEXIST;
             }
         }
@@ -600,8 +679,13 @@ int zmk_runtime_config_begin_update(uint32_t expected_active_generation, size_t 
         return -ESTALE;
     }
 
-    if (staged_config.update.active || pending_config.present) {
+    if (pending_config.present) {
         return -EBUSY;
+    }
+    if (staged_config.update.active) {
+        /* A previous client dropped mid-upload. Replace RAM staging. */
+        memset(&staged_config.update, 0, sizeof(staged_config.update));
+        staged_config.present = false;
     }
 
     if (snapshot_size > sizeof(staged_config.pool.serialized_bytes)) {
@@ -721,6 +805,8 @@ int zmk_runtime_config_stage_uploaded_snapshot(
     size_t serialized_size;
     int ret;
 
+    zmk_runtime_config_clear_last_reason();
+
     ret =
         zmk_runtime_config_get_uploaded_snapshot(update_id, &serialized_snapshot, &serialized_size);
     if (ret != 0) {
@@ -741,6 +827,7 @@ int zmk_runtime_config_stage_uploaded_snapshot(
             result->valid = false;
             result->error = ZMK_RUNTIME_CONFIG_ERROR_INVALID_ARGUMENT;
         }
+        set_last_reason("decoded snapshot counts do not match staged pool");
         ret = -EINVAL;
     }
 
@@ -1059,14 +1146,7 @@ int zmk_runtime_config_get_persistable_update_size(uint32_t update_id, size_t *s
         return -EINVAL;
     }
 
-    *snapshot_size = sizeof(header) +
-                     header.keymap_override_count *
-                         sizeof(struct runtime_config_persisted_keymap_override) +
-                     header.object_count * sizeof(struct runtime_config_persisted_object) +
-                     header.combo_count * sizeof(struct runtime_config_persisted_combo) +
-                     header.macro_step_count * sizeof(struct runtime_config_persisted_macro_step) +
-                     header.tap_dance_action_count *
-                         sizeof(struct runtime_config_persisted_tap_dance_action);
+    *snapshot_size = persisted_payload_size(&header);
     return *snapshot_size > sizeof(staged_config.pool.serialized_bytes) ? -ENOSPC : 0;
 }
 
@@ -1170,6 +1250,7 @@ int zmk_runtime_config_get_persistable_update(uint32_t update_id, const uint8_t 
             .require_prior_idle_ms = source->require_prior_idle_ms,
             .slow_release = source->slow_release,
             .output = persist_action(&source->output),
+            .layer_mask = source->layer_mask,
         };
         size_t offset = sizeof(header) +
                         header.keymap_override_count *
@@ -1229,11 +1310,15 @@ int zmk_runtime_config_get_persistable_update(uint32_t update_id, const uint8_t 
 }
 
 int zmk_runtime_config_abort_update(uint32_t update_id) {
-    if (!staged_config.update.active || staged_config.update.id != update_id) {
+    if (!staged_config.update.active) {
+        return -ENOENT;
+    }
+    if (update_id != 0U && staged_config.update.id != update_id) {
         return -ENOENT;
     }
 
     memset(&staged_config.update, 0, sizeof(staged_config.update));
+    staged_config.present = false;
     return 0;
 }
 
@@ -1332,15 +1417,10 @@ int zmk_runtime_config_prepare_persisted_generation(const uint8_t *snapshot_byte
     }
 
     memcpy(&header, snapshot_bytes, sizeof(header));
-    expected_size = sizeof(header) + header.keymap_override_count *
-                                       sizeof(struct runtime_config_persisted_keymap_override) +
-                    header.object_count * sizeof(struct runtime_config_persisted_object) +
-                    header.combo_count * sizeof(struct runtime_config_persisted_combo) +
-                    header.macro_step_count * sizeof(struct runtime_config_persisted_macro_step) +
-                    header.tap_dance_action_count *
-                        sizeof(struct runtime_config_persisted_tap_dance_action);
+    expected_size = persisted_payload_size(&header);
     if (header.magic != RUNTIME_CONFIG_PERSISTED_PAYLOAD_MAGIC ||
-        header.version != RUNTIME_CONFIG_PERSISTED_PAYLOAD_VERSION ||
+        (header.version != RUNTIME_CONFIG_PERSISTED_PAYLOAD_VERSION &&
+         header.version != RUNTIME_CONFIG_PERSISTED_PAYLOAD_VERSION_V6) ||
         header.keymap_override_count > CONFIG_ZMK_RUNTIME_MAX_KEYMAP_OVERRIDES ||
         header.object_count > CONFIG_ZMK_RUNTIME_MAX_OBJECTS ||
         header.combo_count > CONFIG_ZMK_RUNTIME_MAX_COMBOS ||
@@ -1413,14 +1493,15 @@ int zmk_runtime_config_prepare_persisted_generation(const uint8_t *snapshot_byte
     }
 
     for (size_t i = 0; i < header.combo_count; i++) {
-        struct runtime_config_persisted_combo source;
+        const size_t combo_size = persisted_combo_size(header.version);
         size_t offset = sizeof(header) +
                         header.keymap_override_count *
                             sizeof(struct runtime_config_persisted_keymap_override) +
                         header.object_count * sizeof(struct runtime_config_persisted_object) +
-                        i * sizeof(source);
+                        i * combo_size;
+        struct runtime_config_persisted_combo source = {0};
 
-        memcpy(&source, snapshot_bytes + offset, sizeof(source));
+        memcpy(&source, snapshot_bytes + offset, combo_size);
         staged_config.pool.combos[i] = (struct zmk_runtime_combo_slot){
             .id = source.id,
             .key_count = source.key_count,
@@ -1428,6 +1509,9 @@ int zmk_runtime_config_prepare_persisted_generation(const uint8_t *snapshot_byte
             .require_prior_idle_ms = source.require_prior_idle_ms,
             .slow_release = source.slow_release,
             .output = restore_action(&source.output),
+            .layer_mask = header.version >= RUNTIME_CONFIG_PERSISTED_PAYLOAD_VERSION
+                              ? source.layer_mask
+                              : 0U,
         };
         memcpy(staged_config.pool.combos[i].positions, source.positions,
                sizeof(staged_config.pool.combos[i].positions));
@@ -1439,7 +1523,7 @@ int zmk_runtime_config_prepare_persisted_generation(const uint8_t *snapshot_byte
                         header.keymap_override_count *
                             sizeof(struct runtime_config_persisted_keymap_override) +
                         header.object_count * sizeof(struct runtime_config_persisted_object) +
-                        header.combo_count * sizeof(struct runtime_config_persisted_combo) +
+                        header.combo_count * persisted_combo_size(header.version) +
                         i * sizeof(source);
 
         memcpy(&source, snapshot_bytes + offset, sizeof(source));
@@ -1464,7 +1548,7 @@ int zmk_runtime_config_prepare_persisted_generation(const uint8_t *snapshot_byte
                         header.keymap_override_count *
                             sizeof(struct runtime_config_persisted_keymap_override) +
                         header.object_count * sizeof(struct runtime_config_persisted_object) +
-                        header.combo_count * sizeof(struct runtime_config_persisted_combo) +
+                        header.combo_count * persisted_combo_size(header.version) +
                         header.macro_step_count *
                             sizeof(struct runtime_config_persisted_macro_step) +
                         i * sizeof(source);

@@ -230,6 +230,7 @@ void zmk_combo_runtime_config_refresh(void) {
         destination.timeout_ms = (int32_t)source->timeout_ms;
         destination.require_prior_idle_ms = (int32_t)source->require_prior_idle_ms;
         destination.slow_release = source->slow_release;
+        destination.layer_mask = source->layer_mask;
         for (size_t key_index = 0; key_index < source->key_count; key_index++) {
             bool found = false;
 
