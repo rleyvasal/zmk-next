@@ -68,6 +68,24 @@ static int on_binding_pressed(struct zmk_behavior_binding *binding,
         return 0;
     }
 
+    /* stage_uploaded_snapshot() requires received_size == expected_size
+     * (get_uploaded_snapshot()'s own check) before it will proceed - a
+     * single dummy byte satisfies that bookkeeping the same way the
+     * power-loss test's stage_test_snapshot() already does. */
+    {
+        uint8_t dummy_byte = 0;
+        size_t accepted;
+        size_t next_offset;
+
+        ret = zmk_runtime_config_upload_update_chunk(update_id, 0, &dummy_byte, 1, &accepted,
+                                                     &next_offset);
+        if (ret != 0) {
+            LOG_INF("RCFG_MOD_MORPH_TEST upload error ret=%d", ret);
+            (void)zmk_runtime_config_abort_update(update_id);
+            return 0;
+        }
+    }
+
     ret = zmk_runtime_config_append_staged_object(update_id, &object);
     if (ret != 0) {
         LOG_INF("RCFG_MOD_MORPH_TEST append error ret=%d", ret);
