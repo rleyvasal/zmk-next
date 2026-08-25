@@ -56,6 +56,10 @@ jobs:
       image: zmkfirmware/zmk-build-arm:stable
     needs: matrix
     name: Build
+    env:
+      # `if:` can't reference `secrets` directly, so thread it through env first
+      # (same workaround zmk-next-configurator's CI already uses for this token).
+      HAS_MESSAGES_TOKEN: ${{ secrets.MESSAGES_REPO_TOKEN != '' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.matrix.outputs.build_matrix) }}
@@ -128,6 +132,14 @@ jobs:
       - name: West Init
         working-directory: ${{ env.base_dir }}
         run: west init -l "${{ env.base_dir }}/${{ inputs.config_path }}"
+
+      # zmk-next-messages (modules/msgs/zmk-next-messages in app/west.yml) is
+      # private; west update's own git clone has no credentials for it
+      # otherwise and fails the build for any config pinned to this fork.
+      - name: Configure credentials for private zmk-next-messages module
+        if: ${{ env.HAS_MESSAGES_TOKEN == 'true' }}
+        run: |
+          git config --global url."https://x-access-token:${{ secrets.MESSAGES_REPO_TOKEN }}@github.com/rleyvasal/zmk-next-messages".insteadOf "https://github.com/rleyvasal/zmk-next-messages"
 
       - name: West Update
         working-directory: ${{ env.base_dir }}

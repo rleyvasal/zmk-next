@@ -19,12 +19,23 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: docker.io/zmkfirmware/zmk-dev-arm:4.1
+    env:
+      # `if:` can't reference `secrets` directly, so thread it through env first
+      # (same workaround zmk-next-configurator's CI already uses for this token).
+      HAS_MESSAGES_TOKEN: ${{ secrets.MESSAGES_REPO_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v7
       - name: Install dependencies
         run: pip install --break-system-packages -r app/scripts/requirements.txt
       - name: West init
         run: west init -l app
+      # zmk-next-messages (modules/msgs/zmk-next-messages in app/west.yml) is
+      # private; west update's own git clone has no credentials for it
+      # otherwise and fails the job before metadata validation ever runs.
+      - name: Configure credentials for private zmk-next-messages module
+        if: ${{ env.HAS_MESSAGES_TOKEN == 'true' }}
+        run: |
+          git config --global url."https://x-access-token:${{ secrets.MESSAGES_REPO_TOKEN }}@github.com/rleyvasal/zmk-next-messages".insteadOf "https://github.com/rleyvasal/zmk-next-messages"
       - name: Update modules (west update)
         run: west update
       - name: Export Zephyr CMake package (west zephyr-export)
