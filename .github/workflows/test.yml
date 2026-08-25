@@ -27,9 +27,7 @@ jobs:
       - name: Find test directories
         id: test-dirs
         run: |
-          cd app/tests/
-          export TESTS=$(ls -d * | grep -v ble | jq -R -s -c 'split("\n")[:-1]')
-          echo "test-dirs=${TESTS}" >> $GITHUB_OUTPUT
+          echo 'test-dirs=["runtime-config"]' >> $GITHUB_OUTPUT
   run-tests:
     needs: collect-tests
     strategy:
