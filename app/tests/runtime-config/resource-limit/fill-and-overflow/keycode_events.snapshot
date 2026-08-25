@@ -1,0 +1,5 @@
+keymap_overrides all_filled=1 overflow_rejected=1
+objects all_filled=1 overflow_rejected=1
+combos all_filled=1 overflow_rejected=1
+macro_steps all_filled=1 overflow_rejected=1
+tap_dance_actions all_filled=1 overflow_rejected=1

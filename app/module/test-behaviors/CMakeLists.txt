@@ -8,4 +8,5 @@ if (((NOT CONFIG_ZMK_SPLIT) OR CONFIG_ZMK_SPLIT_ROLE_CENTRAL) AND CONFIG_ZMK_TES
   target_sources_ifdef(CONFIG_ZMK_RUNTIME_CONFIG app PRIVATE behavior_runtime_config_mod_morph_test.c)
   target_sources_ifdef(CONFIG_ZMK_RUNTIME_CONFIG app PRIVATE behavior_runtime_config_idle_seed_test.c)
   target_sources_ifdef(CONFIG_ZMK_RUNTIME_CONFIG app PRIVATE behavior_runtime_config_idle_check_test.c)
+  target_sources_ifdef(CONFIG_ZMK_RUNTIME_CONFIG app PRIVATE behavior_runtime_config_resource_limit_test.c)
 endif()
