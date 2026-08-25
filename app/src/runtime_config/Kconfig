@@ -4,6 +4,7 @@
 menuconfig ZMK_RUNTIME_CONFIG
     bool "ZMK Next runtime configuration"
     depends on !ZMK_SPLIT || ZMK_SPLIT_ROLE_CENTRAL
+    select CRC
     help
       Enable bounded ZMK Next runtime configuration: the snapshot model,
       Studio RPC service, transactional Settings storage, and safe activation
