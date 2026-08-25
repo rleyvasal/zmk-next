@@ -95,7 +95,12 @@ jobs:
                 console.log(output.toString());
               } catch (e) {
                 console.error(`::error::Failed to build ${{ matrix.board }} ${shieldArgs.shield} ${shieldArgs['cmake-args']}`);
-                console.error(e);
+                // execSync only attaches captured output to stdout/stderr
+                // buffers on the thrown error; console.error(e) alone never
+                // printed them, so build failures showed no compiler output.
+                if (e.stdout) console.log(e.stdout.toString());
+                if (e.stderr) console.error(e.stderr.toString());
+                console.error(e.message || e);
                 error = true;
               } finally {
                 console.log('::endgroup::');
