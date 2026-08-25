@@ -107,9 +107,10 @@ static int new_tap_dance(struct zmk_behavior_binding_event *event,
 #endif
 
 #if IS_ENABLED(CONFIG_ZMK_RUNTIME_CONFIG)
-static int new_runtime_tap_dance(
-    struct zmk_behavior_binding_event *event, const struct zmk_runtime_tap_dance_config *config,
-    const struct zmk_runtime_tap_dance_action *actions, struct active_tap_dance **tap_dance) {
+static int new_runtime_tap_dance(struct zmk_behavior_binding_event *event,
+                                 const struct zmk_runtime_tap_dance_config *config,
+                                 const struct zmk_runtime_tap_dance_action *actions,
+                                 struct active_tap_dance **tap_dance) {
     struct active_tap_dance *ref_dance = NULL;
 
     if (!config || !actions || config->action_count == 0U ||
@@ -335,10 +336,9 @@ static int on_tap_dance_binding_released(struct zmk_behavior_binding *binding,
 #endif
 
 #if IS_ENABLED(CONFIG_ZMK_RUNTIME_CONFIG)
-int zmk_behavior_tap_dance_runtime_pressed(
-    const struct zmk_runtime_tap_dance_config *config,
-    const struct zmk_runtime_tap_dance_action *actions,
-    struct zmk_behavior_binding_event event) {
+int zmk_behavior_tap_dance_runtime_pressed(const struct zmk_runtime_tap_dance_config *config,
+                                           const struct zmk_runtime_tap_dance_action *actions,
+                                           struct zmk_behavior_binding_event event) {
     struct active_tap_dance *tap_dance = find_tap_dance(event.position);
     int ret;
 

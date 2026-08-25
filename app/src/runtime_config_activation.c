@@ -143,8 +143,7 @@ int zmk_runtime_config_activation_blocker_release(void) {
     return 0;
 }
 
-void zmk_runtime_config_get_activation_status(
-    struct zmk_runtime_config_activation_status *status) {
+void zmk_runtime_config_get_activation_status(struct zmk_runtime_config_activation_status *status) {
     if (!status) {
         return;
     }

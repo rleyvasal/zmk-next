@@ -316,10 +316,11 @@ static enum flavor runtime_hold_tap_flavor(enum zmk_runtime_hold_tap_flavor flav
     }
 }
 
-static struct active_hold_tap *store_runtime_hold_tap(
-    const struct zmk_runtime_hold_tap_config *config,
-    const struct zmk_behavior_binding *tap_binding,
-    const struct zmk_behavior_binding *hold_binding, struct zmk_behavior_binding_event *event) {
+static struct active_hold_tap *
+store_runtime_hold_tap(const struct zmk_runtime_hold_tap_config *config,
+                       const struct zmk_behavior_binding *tap_binding,
+                       const struct zmk_behavior_binding *hold_binding,
+                       struct zmk_behavior_binding_event *event) {
     for (int i = 0; i < ZMK_BHV_HOLD_TAP_MAX_HELD; i++) {
         if (active_hold_taps[i].position != ZMK_BHV_HOLD_TAP_POSITION_NOT_USED) {
             continue;
@@ -706,8 +707,8 @@ static int on_hold_tap_binding_pressed(struct zmk_behavior_binding *binding,
 
     // if this behavior was queued we have to adjust the timer to only
     // wait for the remaining time.
-    int32_t tapping_term_ms_left = (hold_tap->timestamp + cfg->config.tapping_term_ms) -
-                                   k_uptime_get();
+    int32_t tapping_term_ms_left =
+        (hold_tap->timestamp + cfg->config.tapping_term_ms) - k_uptime_get();
     k_work_schedule(&hold_tap->work, K_MSEC(tapping_term_ms_left));
 
     return ZMK_BEHAVIOR_OPAQUE;
@@ -800,9 +801,9 @@ int zmk_behavior_hold_tap_runtime_pressed(const struct zmk_runtime_hold_tap_conf
     }
 
     decide_hold_tap(hold_tap, HT_KEY_DOWN);
-    ret = k_work_schedule(&hold_tap->work,
-                          K_MSEC((hold_tap->timestamp + hold_tap->config.tapping_term_ms) -
-                                 k_uptime_get()));
+    ret = k_work_schedule(
+        &hold_tap->work,
+        K_MSEC((hold_tap->timestamp + hold_tap->config.tapping_term_ms) - k_uptime_get()));
     if (ret < 0) {
         if (undecided_hold_tap == hold_tap) {
             undecided_hold_tap = NULL;
@@ -1021,13 +1022,13 @@ SYS_INIT(behavior_hold_tap_runtime_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORIT
 #endif
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
-#define HOLD_TAP_TRIGGER_POSITIONS(n)                                                            \
-    COND_CODE_1(IS_EQ(DT_INST_PROP_LEN(n, hold_trigger_key_positions), 0), (),                   \
-                (static const int32_t behavior_hold_tap_trigger_positions_##n[] =                \
+#define HOLD_TAP_TRIGGER_POSITIONS(n)                                                              \
+    COND_CODE_1(IS_EQ(DT_INST_PROP_LEN(n, hold_trigger_key_positions), 0), (),                     \
+                (static const int32_t behavior_hold_tap_trigger_positions_##n[] =                  \
                      DT_INST_PROP(n, hold_trigger_key_positions);))
 
-#define HOLD_TAP_TRIGGER_POSITIONS_POINTER(n)                                                     \
-    COND_CODE_1(IS_EQ(DT_INST_PROP_LEN(n, hold_trigger_key_positions), 0), (NULL),                \
+#define HOLD_TAP_TRIGGER_POSITIONS_POINTER(n)                                                      \
+    COND_CODE_1(IS_EQ(DT_INST_PROP_LEN(n, hold_trigger_key_positions), 0), (NULL),                 \
                 (behavior_hold_tap_trigger_positions_##n))
 
 #define KP_INST(n)                                                                                 \
@@ -1036,12 +1037,11 @@ SYS_INIT(behavior_hold_tap_runtime_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORIT
         .config = {.tapping_term_ms = DT_INST_PROP(n, tapping_term_ms),                            \
                    .quick_tap_ms = DT_INST_PROP(n, quick_tap_ms),                                  \
                    .require_prior_idle_ms = DT_INST_PROP(n, global_quick_tap)                      \
-                                                ? DT_INST_PROP(n, quick_tap_ms)                     \
-                                                : DT_INST_PROP(n, require_prior_idle_ms),           \
+                                                ? DT_INST_PROP(n, quick_tap_ms)                    \
+                                                : DT_INST_PROP(n, require_prior_idle_ms),          \
                    .flavor = DT_ENUM_IDX(DT_DRV_INST(n), flavor),                                  \
                    .hold_while_undecided = DT_INST_PROP(n, hold_while_undecided),                  \
-                   .hold_while_undecided_linger =                                                 \
-                       DT_INST_PROP(n, hold_while_undecided_linger),                              \
+                   .hold_while_undecided_linger = DT_INST_PROP(n, hold_while_undecided_linger),    \
                    .retro_tap = DT_INST_PROP(n, retro_tap),                                        \
                    .hold_trigger_on_release = DT_INST_PROP(n, hold_trigger_on_release),            \
                    .hold_trigger_key_positions_len =                                               \

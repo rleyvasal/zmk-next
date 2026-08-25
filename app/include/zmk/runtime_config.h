@@ -145,8 +145,7 @@ struct zmk_runtime_config_snapshot {
 
 struct zmk_runtime_config_pool {
     uint16_t keymap_override_count;
-    struct zmk_runtime_keymap_override
-        keymap_overrides[CONFIG_ZMK_RUNTIME_MAX_KEYMAP_OVERRIDES];
+    struct zmk_runtime_keymap_override keymap_overrides[CONFIG_ZMK_RUNTIME_MAX_KEYMAP_OVERRIDES];
     uint16_t object_count;
     struct zmk_runtime_object_slot objects[CONFIG_ZMK_RUNTIME_MAX_OBJECTS];
     uint16_t combo_count;
@@ -154,8 +153,7 @@ struct zmk_runtime_config_pool {
     uint16_t macro_step_count;
     struct zmk_runtime_macro_step macro_steps[CONFIG_ZMK_RUNTIME_MAX_MACRO_STEPS];
     uint16_t tap_dance_action_count;
-    struct zmk_runtime_tap_dance_action
-        tap_dance_actions[CONFIG_ZMK_RUNTIME_MAX_TAP_DANCE_ACTIONS];
+    struct zmk_runtime_tap_dance_action tap_dance_actions[CONFIG_ZMK_RUNTIME_MAX_TAP_DANCE_ACTIONS];
     uint8_t serialized_bytes[CONFIG_ZMK_RUNTIME_MAX_PERSISTED_BYTES];
 };
 
@@ -210,7 +208,8 @@ const struct zmk_runtime_config_snapshot *zmk_runtime_config_staged_snapshot(voi
 
 int zmk_runtime_config_begin_update(uint32_t expected_active_generation, size_t snapshot_size,
                                     uint32_t *update_id);
-/* Stage an empty overlay so the existing transactional persistence path can restore stock defaults. */
+/* Stage an empty overlay so the existing transactional persistence path can restore stock defaults.
+ */
 int zmk_runtime_config_stage_stock_update(uint32_t expected_active_generation, uint32_t *update_id);
 int zmk_runtime_config_upload_update_chunk(uint32_t update_id, size_t offset, const uint8_t *chunk,
                                            size_t chunk_size, size_t *accepted_bytes,
@@ -230,8 +229,7 @@ int zmk_runtime_config_set_staged_objects(uint32_t update_id,
 int zmk_runtime_config_append_staged_object(uint32_t update_id,
                                             const struct zmk_runtime_object_slot *object);
 int zmk_runtime_config_set_staged_combos(uint32_t update_id,
-                                         const struct zmk_runtime_combo_slot *combos,
-                                         size_t count);
+                                         const struct zmk_runtime_combo_slot *combos, size_t count);
 int zmk_runtime_config_append_staged_combo(uint32_t update_id,
                                            const struct zmk_runtime_combo_slot *combo);
 int zmk_runtime_config_set_staged_macro_steps(uint32_t update_id,
@@ -252,10 +250,10 @@ size_t zmk_runtime_config_max_update_chunk_bytes(void);
 
 int zmk_runtime_config_prepare_pending_update(uint32_t update_id, uint32_t generation);
 int zmk_runtime_config_prepare_persisted_generation(const uint8_t *snapshot_bytes,
-                                                     size_t snapshot_size, uint32_t generation);
+                                                    size_t snapshot_size, uint32_t generation);
 int zmk_runtime_config_activate_pending_generation(uint32_t generation);
-const struct zmk_behavior_binding *
-zmk_runtime_config_get_keymap_override(uint8_t layer_id, uint16_t key_position);
+const struct zmk_behavior_binding *zmk_runtime_config_get_keymap_override(uint8_t layer_id,
+                                                                          uint16_t key_position);
 void zmk_runtime_config_get_active_snapshot(struct zmk_runtime_config_snapshot *snapshot);
 const struct zmk_runtime_keymap_override *
 zmk_runtime_config_get_active_keymap_override(size_t index);
@@ -266,9 +264,9 @@ const struct zmk_runtime_object_slot *zmk_runtime_config_get_active_object_at(si
 size_t zmk_runtime_config_get_active_object_count(void);
 const struct zmk_runtime_combo_slot *zmk_runtime_config_get_active_combo(size_t index);
 size_t zmk_runtime_config_get_active_combo_count(void);
-int zmk_runtime_config_get_active_macro_steps(
-    zmk_runtime_object_id_t object_id, const struct zmk_runtime_macro_step **steps,
-    size_t *step_count);
+int zmk_runtime_config_get_active_macro_steps(zmk_runtime_object_id_t object_id,
+                                              const struct zmk_runtime_macro_step **steps,
+                                              size_t *step_count);
 int zmk_runtime_config_get_active_tap_dance_actions(
     zmk_runtime_object_id_t object_id, const struct zmk_runtime_tap_dance_action **actions,
     size_t *action_count, uint32_t *tapping_term_ms);
@@ -291,5 +289,4 @@ int zmk_runtime_config_request_activation(uint32_t generation);
 int zmk_runtime_config_note_key_state(uint32_t position, bool pressed);
 int zmk_runtime_config_activation_blocker_acquire(void);
 int zmk_runtime_config_activation_blocker_release(void);
-void zmk_runtime_config_get_activation_status(
-    struct zmk_runtime_config_activation_status *status);
+void zmk_runtime_config_get_activation_status(struct zmk_runtime_config_activation_status *status);

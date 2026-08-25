@@ -19,13 +19,9 @@ void zmk_combo_runtime_config_refresh(void);
 
 static char last_reason[120];
 
-void zmk_runtime_config_clear_last_reason(void) {
-    last_reason[0] = '\0';
-}
+void zmk_runtime_config_clear_last_reason(void) { last_reason[0] = '\0'; }
 
-const char *zmk_runtime_config_last_reason(void) {
-    return last_reason;
-}
+const char *zmk_runtime_config_last_reason(void) { return last_reason; }
 
 static void set_last_reason(const char *text) {
     if (!text) {
@@ -59,13 +55,11 @@ static struct {
     uint16_t combo_count;
     uint16_t macro_step_count;
     uint16_t tap_dance_action_count;
-    struct zmk_runtime_keymap_override
-        keymap_overrides[CONFIG_ZMK_RUNTIME_MAX_KEYMAP_OVERRIDES];
+    struct zmk_runtime_keymap_override keymap_overrides[CONFIG_ZMK_RUNTIME_MAX_KEYMAP_OVERRIDES];
     struct zmk_runtime_object_slot objects[CONFIG_ZMK_RUNTIME_MAX_OBJECTS];
     struct zmk_runtime_combo_slot combos[CONFIG_ZMK_RUNTIME_MAX_COMBOS];
     struct zmk_runtime_macro_step macro_steps[CONFIG_ZMK_RUNTIME_MAX_MACRO_STEPS];
-    struct zmk_runtime_tap_dance_action
-        tap_dance_actions[CONFIG_ZMK_RUNTIME_MAX_TAP_DANCE_ACTIONS];
+    struct zmk_runtime_tap_dance_action tap_dance_actions[CONFIG_ZMK_RUNTIME_MAX_TAP_DANCE_ACTIONS];
     struct zmk_behavior_binding bindings[CONFIG_ZMK_RUNTIME_MAX_KEYMAP_OVERRIDES];
 } pending_config, active_config;
 
@@ -180,7 +174,8 @@ static size_t persisted_payload_size(const struct runtime_config_persisted_paylo
            header->object_count * sizeof(struct runtime_config_persisted_object) +
            header->combo_count * persisted_combo_size(header->version) +
            header->macro_step_count * sizeof(struct runtime_config_persisted_macro_step) +
-           header->tap_dance_action_count * sizeof(struct runtime_config_persisted_tap_dance_action);
+           header->tap_dance_action_count *
+               sizeof(struct runtime_config_persisted_tap_dance_action);
 }
 
 static void
@@ -235,9 +230,9 @@ void zmk_runtime_config_init_empty_snapshot(struct zmk_runtime_config_snapshot *
            sizeof(snapshot->capability_fingerprint));
 }
 
-static const struct zmk_runtime_object_slot *find_object(
-    const struct zmk_runtime_object_slot *objects, size_t count,
-    zmk_runtime_object_id_t object_id) {
+static const struct zmk_runtime_object_slot *
+find_object(const struct zmk_runtime_object_slot *objects, size_t count,
+            zmk_runtime_object_id_t object_id) {
     if (object_id == ZMK_RUNTIME_OBJECT_ID_INVALID) {
         return NULL;
     }
@@ -260,8 +255,7 @@ static int compiled_action_to_binding(const struct zmk_runtime_action_ref *actio
         return -EINVAL;
     }
 
-    behavior_name =
-        zmk_behavior_find_behavior_name_from_local_id(action->data.compiled.local_id);
+    behavior_name = zmk_behavior_find_behavior_name_from_local_id(action->data.compiled.local_id);
     if (!behavior_name) {
         return -ENODEV;
     }
@@ -337,8 +331,7 @@ static bool action_refs_equal(const struct zmk_runtime_action_ref *left,
                left->data.compiled.param2 == right->data.compiled.param2;
     }
 
-    return left->kind == ZMK_RUNTIME_ACTION_OBJECT &&
-           left->data.object_id == right->data.object_id;
+    return left->kind == ZMK_RUNTIME_ACTION_OBJECT && left->data.object_id == right->data.object_id;
 }
 
 static int validate_macro_step(const struct zmk_runtime_macro_step *step) {
@@ -432,10 +425,10 @@ static int validate_object(const struct zmk_runtime_object_slot *object,
     switch (object->type) {
     case ZMK_RUNTIME_OBJECT_TYPE_MOD_MORPH:
         if (object->data.mod_morph.modifiers == 0U ||
-            action_to_binding(&object->data.mod_morph.normal_action, NULL, 0U, false,
-                              &binding) != 0 ||
-            action_to_binding(&object->data.mod_morph.morphed_action, NULL, 0U, false,
-                              &binding) != 0) {
+            action_to_binding(&object->data.mod_morph.normal_action, NULL, 0U, false, &binding) !=
+                0 ||
+            action_to_binding(&object->data.mod_morph.morphed_action, NULL, 0U, false, &binding) !=
+                0) {
             return -EINVAL;
         }
         return 0;
@@ -710,14 +703,14 @@ int zmk_runtime_config_begin_update(uint32_t expected_active_generation, size_t 
     memset(staged_config.pool.objects, 0, sizeof(staged_config.pool.objects));
     memset(staged_config.pool.combos, 0, sizeof(staged_config.pool.combos));
     memset(staged_config.pool.macro_steps, 0, sizeof(staged_config.pool.macro_steps));
-    memset(staged_config.pool.tap_dance_actions, 0,
-           sizeof(staged_config.pool.tap_dance_actions));
+    memset(staged_config.pool.tap_dance_actions, 0, sizeof(staged_config.pool.tap_dance_actions));
     *update_id = staged_config.update.id;
 
     return 0;
 }
 
-int zmk_runtime_config_stage_stock_update(uint32_t expected_active_generation, uint32_t *update_id) {
+int zmk_runtime_config_stage_stock_update(uint32_t expected_active_generation,
+                                          uint32_t *update_id) {
     struct zmk_runtime_config_snapshot snapshot;
     struct zmk_runtime_config_validation_result validation;
     int ret;
@@ -817,12 +810,12 @@ int zmk_runtime_config_stage_uploaded_snapshot(
     (void)serialized_size;
 
     ret = zmk_runtime_config_stage_snapshot(snapshot, result);
-    if (ret == 0 && (snapshot->keymap_override_count != staged_config.pool.keymap_override_count ||
-                     snapshot->object_count != staged_config.pool.object_count ||
-                     snapshot->combo_count != staged_config.pool.combo_count ||
-                     snapshot->macro_step_count != staged_config.pool.macro_step_count ||
-                     snapshot->tap_dance_action_count !=
-                         staged_config.pool.tap_dance_action_count)) {
+    if (ret == 0 &&
+        (snapshot->keymap_override_count != staged_config.pool.keymap_override_count ||
+         snapshot->object_count != staged_config.pool.object_count ||
+         snapshot->combo_count != staged_config.pool.combo_count ||
+         snapshot->macro_step_count != staged_config.pool.macro_step_count ||
+         snapshot->tap_dance_action_count != staged_config.pool.tap_dance_action_count)) {
         if (result) {
             result->valid = false;
             result->error = ZMK_RUNTIME_CONFIG_ERROR_INVALID_ARGUMENT;
@@ -833,8 +826,7 @@ int zmk_runtime_config_stage_uploaded_snapshot(
 
     if (ret == 0) {
         ret = validate_objects(staged_config.pool.objects, staged_config.pool.object_count,
-                               staged_config.pool.macro_steps,
-                               staged_config.pool.macro_step_count,
+                               staged_config.pool.macro_steps, staged_config.pool.macro_step_count,
                                staged_config.pool.tap_dance_actions,
                                staged_config.pool.tap_dance_action_count);
         if (ret != 0 && result) {
@@ -947,8 +939,7 @@ int zmk_runtime_config_set_staged_objects(uint32_t update_id,
     }
 
     if (count != 0U) {
-        memcpy(staged_config.pool.objects, objects,
-               count * sizeof(staged_config.pool.objects[0]));
+        memcpy(staged_config.pool.objects, objects, count * sizeof(staged_config.pool.objects[0]));
     }
     staged_config.pool.object_count = count;
     return 0;
@@ -1091,8 +1082,8 @@ int zmk_runtime_config_get_validated_uploaded_snapshot(uint32_t update_id,
     return staged_config.update.validated ? 0 : -EINVAL;
 }
 
-static struct runtime_config_persisted_action_ref persist_action(
-    const struct zmk_runtime_action_ref *action) {
+static struct runtime_config_persisted_action_ref
+persist_action(const struct zmk_runtime_action_ref *action) {
     return (struct runtime_config_persisted_action_ref){
         .kind = action->kind,
         .local_id = action->kind == ZMK_RUNTIME_ACTION_COMPILED_BEHAVIOR
@@ -1113,11 +1104,12 @@ restore_action(const struct runtime_config_persisted_action_ref *action) {
     if (action->kind == ZMK_RUNTIME_ACTION_COMPILED_BEHAVIOR) {
         return (struct zmk_runtime_action_ref){
             .kind = ZMK_RUNTIME_ACTION_COMPILED_BEHAVIOR,
-            .data.compiled = {
-                .local_id = action->local_id,
-                .param1 = action->param1,
-                .param2 = action->param2,
-            },
+            .data.compiled =
+                {
+                    .local_id = action->local_id,
+                    .param1 = action->param1,
+                    .param2 = action->param2,
+                },
         };
     }
 
@@ -1179,16 +1171,14 @@ int zmk_runtime_config_get_persistable_update(uint32_t update_id, const uint8_t 
 
     memcpy(staged_config.pool.serialized_bytes, &header, sizeof(header));
     for (size_t i = 0; i < header.keymap_override_count; i++) {
-        const struct zmk_runtime_keymap_override *source =
-            &staged_config.pool.keymap_overrides[i];
+        const struct zmk_runtime_keymap_override *source = &staged_config.pool.keymap_overrides[i];
         struct runtime_config_persisted_keymap_override destination = {
             .layer_id = source->layer_id,
             .key_position = source->key_position,
             .action = persist_action(&source->action),
         };
 
-        memcpy(staged_config.pool.serialized_bytes +
-                   sizeof(header) + i * sizeof(destination),
+        memcpy(staged_config.pool.serialized_bytes + sizeof(header) + i * sizeof(destination),
                &destination, sizeof(destination));
     }
 
@@ -1198,10 +1188,10 @@ int zmk_runtime_config_get_persistable_update(uint32_t update_id, const uint8_t 
             .id = source->id,
             .type = source->type,
         };
-        size_t offset = sizeof(header) +
-                        header.keymap_override_count *
-                            sizeof(struct runtime_config_persisted_keymap_override) +
-                        i * sizeof(destination);
+        size_t offset =
+            sizeof(header) +
+            header.keymap_override_count * sizeof(struct runtime_config_persisted_keymap_override) +
+            i * sizeof(destination);
 
         switch (source->type) {
         case ZMK_RUNTIME_OBJECT_TYPE_MOD_MORPH:
@@ -1252,11 +1242,11 @@ int zmk_runtime_config_get_persistable_update(uint32_t update_id, const uint8_t 
             .output = persist_action(&source->output),
             .layer_mask = source->layer_mask,
         };
-        size_t offset = sizeof(header) +
-                        header.keymap_override_count *
-                            sizeof(struct runtime_config_persisted_keymap_override) +
-                        header.object_count * sizeof(struct runtime_config_persisted_object) +
-                        i * sizeof(destination);
+        size_t offset =
+            sizeof(header) +
+            header.keymap_override_count * sizeof(struct runtime_config_persisted_keymap_override) +
+            header.object_count * sizeof(struct runtime_config_persisted_object) +
+            i * sizeof(destination);
 
         memcpy(destination.positions, source->positions, sizeof(destination.positions));
         memcpy(staged_config.pool.serialized_bytes + offset, &destination, sizeof(destination));
@@ -1267,12 +1257,12 @@ int zmk_runtime_config_get_persistable_update(uint32_t update_id, const uint8_t 
         struct runtime_config_persisted_macro_step destination = {
             .type = source->type,
         };
-        size_t offset = sizeof(header) +
-                        header.keymap_override_count *
-                            sizeof(struct runtime_config_persisted_keymap_override) +
-                        header.object_count * sizeof(struct runtime_config_persisted_object) +
-                        header.combo_count * sizeof(struct runtime_config_persisted_combo) +
-                        i * sizeof(destination);
+        size_t offset =
+            sizeof(header) +
+            header.keymap_override_count * sizeof(struct runtime_config_persisted_keymap_override) +
+            header.object_count * sizeof(struct runtime_config_persisted_object) +
+            header.combo_count * sizeof(struct runtime_config_persisted_combo) +
+            i * sizeof(destination);
 
         if (source->type == ZMK_RUNTIME_MACRO_STEP_TAP ||
             source->type == ZMK_RUNTIME_MACRO_STEP_PRESS ||
@@ -1292,14 +1282,13 @@ int zmk_runtime_config_get_persistable_update(uint32_t update_id, const uint8_t 
             .tap_action = persist_action(&source->tap_action),
             .hold_action = persist_action(&source->hold_action),
         };
-        size_t offset = sizeof(header) +
-                        header.keymap_override_count *
-                            sizeof(struct runtime_config_persisted_keymap_override) +
-                        header.object_count * sizeof(struct runtime_config_persisted_object) +
-                        header.combo_count * sizeof(struct runtime_config_persisted_combo) +
-                        header.macro_step_count *
-                            sizeof(struct runtime_config_persisted_macro_step) +
-                        i * sizeof(destination);
+        size_t offset =
+            sizeof(header) +
+            header.keymap_override_count * sizeof(struct runtime_config_persisted_keymap_override) +
+            header.object_count * sizeof(struct runtime_config_persisted_object) +
+            header.combo_count * sizeof(struct runtime_config_persisted_combo) +
+            header.macro_step_count * sizeof(struct runtime_config_persisted_macro_step) +
+            i * sizeof(destination);
 
         memcpy(staged_config.pool.serialized_bytes + offset, &destination, sizeof(destination));
     }
@@ -1323,8 +1312,9 @@ int zmk_runtime_config_abort_update(uint32_t update_id) {
 }
 
 static int prepare_runtime_config(const struct zmk_runtime_keymap_override *overrides, size_t count,
-                                  const struct zmk_runtime_object_slot *objects, size_t object_count,
-                                  const struct zmk_runtime_combo_slot *combos, size_t combo_count,
+                                  const struct zmk_runtime_object_slot *objects,
+                                  size_t object_count, const struct zmk_runtime_combo_slot *combos,
+                                  size_t combo_count,
                                   const struct zmk_runtime_macro_step *macro_steps,
                                   size_t macro_step_count,
                                   const struct zmk_runtime_tap_dance_action *tap_dance_actions,
@@ -1396,19 +1386,16 @@ int zmk_runtime_config_prepare_pending_update(uint32_t update_id, uint32_t gener
         return -EINVAL;
     }
 
-    return prepare_runtime_config(staged_config.pool.keymap_overrides,
-                                  staged_config.pool.keymap_override_count,
-                                  staged_config.pool.objects, staged_config.pool.object_count,
-                                  staged_config.pool.combos, staged_config.pool.combo_count,
-                                  staged_config.pool.macro_steps,
-                                  staged_config.pool.macro_step_count,
-                                  staged_config.pool.tap_dance_actions,
-                                  staged_config.pool.tap_dance_action_count,
-                                  generation);
+    return prepare_runtime_config(
+        staged_config.pool.keymap_overrides, staged_config.pool.keymap_override_count,
+        staged_config.pool.objects, staged_config.pool.object_count, staged_config.pool.combos,
+        staged_config.pool.combo_count, staged_config.pool.macro_steps,
+        staged_config.pool.macro_step_count, staged_config.pool.tap_dance_actions,
+        staged_config.pool.tap_dance_action_count, generation);
 }
 
 int zmk_runtime_config_prepare_persisted_generation(const uint8_t *snapshot_bytes,
-                                                     size_t snapshot_size, uint32_t generation) {
+                                                    size_t snapshot_size, uint32_t generation) {
     struct runtime_config_persisted_payload_header header;
     size_t expected_size;
 
@@ -1443,10 +1430,10 @@ int zmk_runtime_config_prepare_persisted_generation(const uint8_t *snapshot_byte
 
     for (size_t i = 0; i < header.object_count; i++) {
         struct runtime_config_persisted_object source;
-        size_t offset = sizeof(header) +
-                        header.keymap_override_count *
-                            sizeof(struct runtime_config_persisted_keymap_override) +
-                        i * sizeof(source);
+        size_t offset =
+            sizeof(header) +
+            header.keymap_override_count * sizeof(struct runtime_config_persisted_keymap_override) +
+            i * sizeof(source);
 
         memcpy(&source, snapshot_bytes + offset, sizeof(source));
         staged_config.pool.objects[i] = (struct zmk_runtime_object_slot){
@@ -1469,23 +1456,21 @@ int zmk_runtime_config_prepare_persisted_generation(const uint8_t *snapshot_byte
             };
             break;
         case ZMK_RUNTIME_OBJECT_TYPE_HOLD_TAP:
-            staged_config.pool.objects[i].data.hold_tap =
-                (struct zmk_runtime_hold_tap_config){
-                    .tap_action = restore_action(&source.data.hold_tap.tap_action),
-                    .hold_action = restore_action(&source.data.hold_tap.hold_action),
-                    .flavor = source.data.hold_tap.flavor,
-                    .tapping_term_ms = source.data.hold_tap.tapping_term_ms,
-                    .quick_tap_ms = source.data.hold_tap.quick_tap_ms,
-                    .require_prior_idle_ms = source.data.hold_tap.require_prior_idle_ms,
-                };
+            staged_config.pool.objects[i].data.hold_tap = (struct zmk_runtime_hold_tap_config){
+                .tap_action = restore_action(&source.data.hold_tap.tap_action),
+                .hold_action = restore_action(&source.data.hold_tap.hold_action),
+                .flavor = source.data.hold_tap.flavor,
+                .tapping_term_ms = source.data.hold_tap.tapping_term_ms,
+                .quick_tap_ms = source.data.hold_tap.quick_tap_ms,
+                .require_prior_idle_ms = source.data.hold_tap.require_prior_idle_ms,
+            };
             break;
         case ZMK_RUNTIME_OBJECT_TYPE_TAP_DANCE:
-            staged_config.pool.objects[i].data.tap_dance =
-                (struct zmk_runtime_tap_dance_config){
-                    .action_offset = source.data.tap_dance.action_offset,
-                    .action_count = source.data.tap_dance.action_count,
-                    .tapping_term_ms = source.data.tap_dance.tapping_term_ms,
-                };
+            staged_config.pool.objects[i].data.tap_dance = (struct zmk_runtime_tap_dance_config){
+                .action_offset = source.data.tap_dance.action_offset,
+                .action_count = source.data.tap_dance.action_count,
+                .tapping_term_ms = source.data.tap_dance.tapping_term_ms,
+            };
             break;
         default:
             return -EBADMSG;
@@ -1494,11 +1479,10 @@ int zmk_runtime_config_prepare_persisted_generation(const uint8_t *snapshot_byte
 
     for (size_t i = 0; i < header.combo_count; i++) {
         const size_t combo_size = persisted_combo_size(header.version);
-        size_t offset = sizeof(header) +
-                        header.keymap_override_count *
-                            sizeof(struct runtime_config_persisted_keymap_override) +
-                        header.object_count * sizeof(struct runtime_config_persisted_object) +
-                        i * combo_size;
+        size_t offset =
+            sizeof(header) +
+            header.keymap_override_count * sizeof(struct runtime_config_persisted_keymap_override) +
+            header.object_count * sizeof(struct runtime_config_persisted_object) + i * combo_size;
         struct runtime_config_persisted_combo source = {0};
 
         memcpy(&source, snapshot_bytes + offset, combo_size);
@@ -1509,9 +1493,8 @@ int zmk_runtime_config_prepare_persisted_generation(const uint8_t *snapshot_byte
             .require_prior_idle_ms = source.require_prior_idle_ms,
             .slow_release = source.slow_release,
             .output = restore_action(&source.output),
-            .layer_mask = header.version >= RUNTIME_CONFIG_PERSISTED_PAYLOAD_VERSION
-                              ? source.layer_mask
-                              : 0U,
+            .layer_mask =
+                header.version >= RUNTIME_CONFIG_PERSISTED_PAYLOAD_VERSION ? source.layer_mask : 0U,
         };
         memcpy(staged_config.pool.combos[i].positions, source.positions,
                sizeof(staged_config.pool.combos[i].positions));
@@ -1519,12 +1502,11 @@ int zmk_runtime_config_prepare_persisted_generation(const uint8_t *snapshot_byte
 
     for (size_t i = 0; i < header.macro_step_count; i++) {
         struct runtime_config_persisted_macro_step source;
-        size_t offset = sizeof(header) +
-                        header.keymap_override_count *
-                            sizeof(struct runtime_config_persisted_keymap_override) +
-                        header.object_count * sizeof(struct runtime_config_persisted_object) +
-                        header.combo_count * persisted_combo_size(header.version) +
-                        i * sizeof(source);
+        size_t offset =
+            sizeof(header) +
+            header.keymap_override_count * sizeof(struct runtime_config_persisted_keymap_override) +
+            header.object_count * sizeof(struct runtime_config_persisted_object) +
+            header.combo_count * persisted_combo_size(header.version) + i * sizeof(source);
 
         memcpy(&source, snapshot_bytes + offset, sizeof(source));
         staged_config.pool.macro_steps[i] = (struct zmk_runtime_macro_step){
@@ -1544,14 +1526,13 @@ int zmk_runtime_config_prepare_persisted_generation(const uint8_t *snapshot_byte
 
     for (size_t i = 0; i < header.tap_dance_action_count; i++) {
         struct runtime_config_persisted_tap_dance_action source;
-        size_t offset = sizeof(header) +
-                        header.keymap_override_count *
-                            sizeof(struct runtime_config_persisted_keymap_override) +
-                        header.object_count * sizeof(struct runtime_config_persisted_object) +
-                        header.combo_count * persisted_combo_size(header.version) +
-                        header.macro_step_count *
-                            sizeof(struct runtime_config_persisted_macro_step) +
-                        i * sizeof(source);
+        size_t offset =
+            sizeof(header) +
+            header.keymap_override_count * sizeof(struct runtime_config_persisted_keymap_override) +
+            header.object_count * sizeof(struct runtime_config_persisted_object) +
+            header.combo_count * persisted_combo_size(header.version) +
+            header.macro_step_count * sizeof(struct runtime_config_persisted_macro_step) +
+            i * sizeof(source);
 
         memcpy(&source, snapshot_bytes + offset, sizeof(source));
         staged_config.pool.tap_dance_actions[i] = (struct zmk_runtime_tap_dance_action){
@@ -1565,15 +1546,12 @@ int zmk_runtime_config_prepare_persisted_generation(const uint8_t *snapshot_byte
     staged_config.pool.combo_count = header.combo_count;
     staged_config.pool.macro_step_count = header.macro_step_count;
     staged_config.pool.tap_dance_action_count = header.tap_dance_action_count;
-    return prepare_runtime_config(staged_config.pool.keymap_overrides,
-                                  staged_config.pool.keymap_override_count,
-                                  staged_config.pool.objects, staged_config.pool.object_count,
-                                  staged_config.pool.combos, staged_config.pool.combo_count,
-                                  staged_config.pool.macro_steps,
-                                  staged_config.pool.macro_step_count,
-                                  staged_config.pool.tap_dance_actions,
-                                  staged_config.pool.tap_dance_action_count,
-                                  generation);
+    return prepare_runtime_config(
+        staged_config.pool.keymap_overrides, staged_config.pool.keymap_override_count,
+        staged_config.pool.objects, staged_config.pool.object_count, staged_config.pool.combos,
+        staged_config.pool.combo_count, staged_config.pool.macro_steps,
+        staged_config.pool.macro_step_count, staged_config.pool.tap_dance_actions,
+        staged_config.pool.tap_dance_action_count, generation);
 }
 
 int zmk_runtime_config_activate_pending_generation(uint32_t generation) {
@@ -1587,8 +1565,8 @@ int zmk_runtime_config_activate_pending_generation(uint32_t generation) {
     return 0;
 }
 
-const struct zmk_behavior_binding *
-zmk_runtime_config_get_keymap_override(uint8_t layer_id, uint16_t key_position) {
+const struct zmk_behavior_binding *zmk_runtime_config_get_keymap_override(uint8_t layer_id,
+                                                                          uint16_t key_position) {
     if (!active_config.present) {
         return NULL;
     }
@@ -1667,9 +1645,9 @@ size_t zmk_runtime_config_get_active_combo_count(void) {
     return active_config.present ? active_config.combo_count : 0U;
 }
 
-int zmk_runtime_config_get_active_macro_steps(
-    zmk_runtime_object_id_t object_id, const struct zmk_runtime_macro_step **steps,
-    size_t *step_count) {
+int zmk_runtime_config_get_active_macro_steps(zmk_runtime_object_id_t object_id,
+                                              const struct zmk_runtime_macro_step **steps,
+                                              size_t *step_count) {
     const struct zmk_runtime_object_slot *object;
     size_t offset;
     size_t count;

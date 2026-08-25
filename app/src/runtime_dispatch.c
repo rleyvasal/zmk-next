@@ -43,7 +43,7 @@ struct runtime_dispatch_invocation {
     struct runtime_macro_invocation macro;
 };
 
-#define RUNTIME_DISPATCH_INVOCATION_COUNT                                                   \
+#define RUNTIME_DISPATCH_INVOCATION_COUNT                                                          \
     (ZMK_KEYMAP_LEN + ZMK_KEYMAP_SENSORS_LEN + ZMK_COMBOS_LEN + CONFIG_ZMK_RUNTIME_MAX_COMBOS)
 
 static struct runtime_dispatch_invocation invocations[RUNTIME_DISPATCH_INVOCATION_COUNT];
@@ -139,8 +139,8 @@ static int continue_macro(struct runtime_dispatch_invocation *invocation) {
     }
 
     if (invocation->macro.tap_release_pending) {
-        ret = zmk_behavior_invoke_binding(&invocation->macro.tap_binding,
-                                          invocation->macro.event, false);
+        ret = zmk_behavior_invoke_binding(&invocation->macro.tap_binding, invocation->macro.event,
+                                          false);
         if (ret < 0) {
             return ret;
         }
@@ -149,8 +149,7 @@ static int continue_macro(struct runtime_dispatch_invocation *invocation) {
     }
 
     while (invocation->macro.next_step < step_count) {
-        const struct zmk_runtime_macro_step *step =
-            &steps[invocation->macro.next_step];
+        const struct zmk_runtime_macro_step *step = &steps[invocation->macro.next_step];
         struct zmk_behavior_binding binding;
 
         switch (step->type) {
@@ -333,7 +332,7 @@ static int dispatch_tap_dance(const struct zmk_runtime_object_slot *object,
     }
 
     ret = zmk_runtime_config_get_active_tap_dance_actions(object->id, &actions, &action_count,
-                                                           &tapping_term_ms);
+                                                          &tapping_term_ms);
     if (ret != 0 || action_count != config->action_count ||
         tapping_term_ms != config->tapping_term_ms) {
         return ret != 0 ? ret : -EINVAL;
@@ -344,8 +343,7 @@ static int dispatch_tap_dance(const struct zmk_runtime_object_slot *object,
 
 int zmk_runtime_dispatch_object(zmk_runtime_object_id_t object_id,
                                 struct zmk_behavior_binding_event event, bool pressed) {
-    const struct zmk_runtime_object_slot *object =
-        zmk_runtime_config_get_active_object(object_id);
+    const struct zmk_runtime_object_slot *object = zmk_runtime_config_get_active_object(object_id);
 
     if (!object) {
         return -ENOENT;

@@ -230,8 +230,7 @@ static bool action_ref_to_wire(const struct zmk_runtime_action_ref *action,
             return false;
         }
 
-        wire_action->which_target =
-            zmk_runtime_config_ActionReference_compiled_behavior_tag;
+        wire_action->which_target = zmk_runtime_config_ActionReference_compiled_behavior_tag;
         wire_action->target.compiled_behavior.behavior_id = action->data.compiled.local_id;
         wire_action->target.compiled_behavior.param1 = action->data.compiled.param1;
         wire_action->target.compiled_behavior.param2 = action->data.compiled.param2;
@@ -344,8 +343,7 @@ static bool encode_tap_dance_actions(pb_ostream_t *stream, const pb_field_t *fie
     }
 
     for (size_t i = 0; i < count; i++) {
-        zmk_runtime_config_TapDanceAction wire_action =
-            zmk_runtime_config_TapDanceAction_init_zero;
+        zmk_runtime_config_TapDanceAction wire_action = zmk_runtime_config_TapDanceAction_init_zero;
 
         if (!action_ref_to_wire(&actions[i].tap_action, &wire_action.tap_action) ||
             !action_ref_to_wire(&actions[i].hold_action, &wire_action.hold_action)) {
@@ -372,8 +370,7 @@ static bool encode_runtime_objects(pb_ostream_t *stream, const pb_field_t *field
 
     for (size_t i = 0; i < count; i++) {
         const struct zmk_runtime_object_slot *object = zmk_runtime_config_get_active_object_at(i);
-        zmk_runtime_config_RuntimeObject wire_object =
-            zmk_runtime_config_RuntimeObject_init_zero;
+        zmk_runtime_config_RuntimeObject wire_object = zmk_runtime_config_RuntimeObject_init_zero;
 
         if (!object || object->id == ZMK_RUNTIME_OBJECT_ID_INVALID) {
             return false;
@@ -438,8 +435,7 @@ static bool encode_combo_positions(pb_ostream_t *stream, const pb_field_t *field
                                    void *const *arg) {
     const struct zmk_runtime_combo_slot *combo = *arg;
 
-    if (!combo || combo->key_count == 0U ||
-        combo->key_count > CONFIG_ZMK_RUNTIME_MAX_COMBO_KEYS) {
+    if (!combo || combo->key_count == 0U || combo->key_count > CONFIG_ZMK_RUNTIME_MAX_COMBO_KEYS) {
         return false;
     }
 
@@ -602,8 +598,7 @@ static int decode_action_reference(const zmk_runtime_config_ActionReference *wir
         return -EINVAL;
     }
 
-    if (wire_action->which_target ==
-        zmk_runtime_config_ActionReference_compiled_behavior_tag) {
+    if (wire_action->which_target == zmk_runtime_config_ActionReference_compiled_behavior_tag) {
         if (wire_action->target.compiled_behavior.behavior_id == 0U ||
             wire_action->target.compiled_behavior.behavior_id > UINT16_MAX) {
             return -EINVAL;
@@ -611,11 +606,12 @@ static int decode_action_reference(const zmk_runtime_config_ActionReference *wir
 
         *action = (struct zmk_runtime_action_ref){
             .kind = ZMK_RUNTIME_ACTION_COMPILED_BEHAVIOR,
-            .data.compiled = {
-                .local_id = wire_action->target.compiled_behavior.behavior_id,
-                .param1 = wire_action->target.compiled_behavior.param1,
-                .param2 = wire_action->target.compiled_behavior.param2,
-            },
+            .data.compiled =
+                {
+                    .local_id = wire_action->target.compiled_behavior.behavior_id,
+                    .param1 = wire_action->target.compiled_behavior.param1,
+                    .param2 = wire_action->target.compiled_behavior.param2,
+                },
         };
         return 0;
     }
@@ -635,8 +631,7 @@ static int decode_action_reference(const zmk_runtime_config_ActionReference *wir
 
 static bool decode_keymap_override(pb_istream_t *stream, const pb_field_t *field, void **arg) {
     struct snapshot_decode_context *context = *arg;
-    zmk_runtime_config_KeymapOverride wire_override =
-        zmk_runtime_config_KeymapOverride_init_zero;
+    zmk_runtime_config_KeymapOverride wire_override = zmk_runtime_config_KeymapOverride_init_zero;
     struct zmk_runtime_keymap_override override = {0};
     int ret;
 
@@ -722,8 +717,7 @@ static bool decode_macro_step(pb_istream_t *stream, const pb_field_t *field, voi
 
 static bool decode_tap_dance_action(pb_istream_t *stream, const pb_field_t *field, void **arg) {
     struct snapshot_decode_context *context = *arg;
-    zmk_runtime_config_TapDanceAction wire_action =
-        zmk_runtime_config_TapDanceAction_init_zero;
+    zmk_runtime_config_TapDanceAction wire_action = zmk_runtime_config_TapDanceAction_init_zero;
     struct zmk_runtime_tap_dance_action action = {0};
     uint16_t expected_tap_count;
     int ret;
@@ -893,8 +887,7 @@ static bool decode_runtime_object(pb_istream_t *stream, const pb_field_t *field,
 
             object.type = ZMK_RUNTIME_OBJECT_TYPE_TAP_DANCE;
             object.data.tap_dance.action_offset = action_offset;
-            object.data.tap_dance.action_count =
-                context->tap_dance_action_count - action_offset;
+            object.data.tap_dance.action_count = context->tap_dance_action_count - action_offset;
             object.data.tap_dance.tapping_term_ms = wire_tap_dance.tapping_term_ms;
             has_definition = true;
             break;
@@ -951,8 +944,7 @@ static bool decode_combo_position(pb_istream_t *stream, const pb_field_t *field,
 static bool decode_combo_definition(pb_istream_t *stream, const pb_field_t *field, void **arg) {
     struct snapshot_decode_context *snapshot_context = *arg;
     struct combo_decode_context combo_context = {0};
-    zmk_runtime_config_ComboDefinition wire_combo =
-        zmk_runtime_config_ComboDefinition_init_zero;
+    zmk_runtime_config_ComboDefinition wire_combo = zmk_runtime_config_ComboDefinition_init_zero;
     int ret;
 
     ARG_UNUSED(field);
@@ -985,8 +977,7 @@ static bool decode_combo_definition(pb_istream_t *stream, const pb_field_t *fiel
     combo_context.combo.require_prior_idle_ms = wire_combo.require_prior_idle_ms;
     combo_context.combo.slow_release = wire_combo.slow_release;
     combo_context.combo.layer_mask = wire_combo.layer_mask;
-    ret = zmk_runtime_config_append_staged_combo(snapshot_context->update_id,
-                                                 &combo_context.combo);
+    ret = zmk_runtime_config_append_staged_combo(snapshot_context->update_id, &combo_context.combo);
     if (ret != 0) {
         snapshot_context->error = ret;
         return false;
@@ -1099,7 +1090,8 @@ static void set_resource_usage(zmk_runtime_config_ValidationResult *response,
     response->resource_usage.persisted_bytes.used = serialized_size;
     response->resource_usage.persisted_bytes.limit = capabilities.max_persisted_bytes;
     response->resource_usage.has_keymap_overrides = true;
-    response->resource_usage.keymap_overrides.used = snapshot ? snapshot->keymap_override_count : 0U;
+    response->resource_usage.keymap_overrides.used =
+        snapshot ? snapshot->keymap_override_count : 0U;
     response->resource_usage.keymap_overrides.limit = capabilities.max_keymap_overrides;
 }
 
@@ -1194,7 +1186,8 @@ zmk_studio_Response reset_runtime_config(const zmk_studio_Request *req) {
     zmk_runtime_config_CommitRuntimeUpdateResult response =
         zmk_runtime_config_CommitRuntimeUpdateResult_init_zero;
     uint32_t update_id = 0U;
-    int ret = zmk_runtime_config_stage_stock_update(request->expected_active_generation, &update_id);
+    int ret =
+        zmk_runtime_config_stage_stock_update(request->expected_active_generation, &update_id);
 
     if (ret == 0) {
         ret = zmk_runtime_config_persist_update(update_id, &response.generation);
