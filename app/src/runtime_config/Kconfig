@@ -113,6 +113,17 @@ config ZMK_RUNTIME_CONFIG_SETTINGS_CHUNK_BYTES
       write size while the complete snapshot remains bounded by
       CONFIG_ZMK_RUNTIME_MAX_PERSISTED_BYTES.
 
+config ZMK_RUNTIME_CONFIG_TEST_HOOKS
+    bool "Expose Runtime Config persistence test hooks"
+    default n
+    help
+      Test-only. Exposes internal persistence functions that write only
+      part of a snapshot's chunks (optionally withholding the manifest)
+      and that force a fresh Settings reload, so a single test process can
+      simulate an update interrupted partway through persisting and a
+      subsequent reboot without actually restarting the process. Do not
+      enable in production builds.
+
 endif
 
 endif

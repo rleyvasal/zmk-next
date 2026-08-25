@@ -1,0 +1,5 @@
+after_baseline generation=1 has_snapshot=1
+after_zero_chunks generation=1 has_snapshot=1
+after_one_chunk generation=1 has_snapshot=1
+after_all_chunks_no_manifest generation=1 has_snapshot=1
+after_second_real generation=2 has_snapshot=1

@@ -4,4 +4,5 @@ if (((NOT CONFIG_ZMK_SPLIT) OR CONFIG_ZMK_SPLIT_ROLE_CENTRAL) AND CONFIG_ZMK_TES
   target_sources(app PRIVATE behavior_remove_layer.c)
   target_sources(app PRIVATE behavior_set_layer_binding_at_idx.c)
   target_sources_ifdef(CONFIG_ZMK_RUNTIME_CONFIG app PRIVATE behavior_runtime_config_validate_test.c)
+  target_sources_ifdef(CONFIG_ZMK_RUNTIME_CONFIG_TEST_HOOKS app PRIVATE behavior_runtime_config_persistence_test.c)
 endif()

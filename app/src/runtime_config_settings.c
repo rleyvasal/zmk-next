@@ -14,6 +14,7 @@
 #include <zephyr/sys/util.h>
 
 #include <zmk/runtime_config.h>
+#include <zmk/runtime_config_test_hooks.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -127,8 +128,9 @@ static void select_newest_valid_slot(void) {
             }
 
             if (newest_slot < 0 ||
-                generation_is_newer(runtime_config_settings.slots[slot].manifest.generation,
-                                    runtime_config_settings.slots[newest_slot].manifest.generation)) {
+                generation_is_newer(
+                    runtime_config_settings.slots[slot].manifest.generation,
+                    runtime_config_settings.slots[newest_slot].manifest.generation)) {
                 newest_slot = slot;
             }
         }
@@ -389,6 +391,96 @@ void zmk_runtime_config_get_persistence_status(
         *status = runtime_config_settings.status;
     }
 }
+
+#if IS_ENABLED(CONFIG_ZMK_RUNTIME_CONFIG_TEST_HOOKS)
+
+int zmk_runtime_config_test_persist_truncated(uint32_t update_id, size_t chunk_count,
+                                              bool write_manifest) {
+    const uint8_t *payload;
+    size_t payload_size;
+    struct runtime_config_settings_manifest manifest;
+    struct zmk_runtime_capabilities capabilities;
+    size_t slot;
+    size_t total_chunks;
+    size_t chunks_to_write;
+    char key[32];
+    int ret;
+
+    ret = zmk_runtime_config_get_persistable_update(update_id, &payload, &payload_size);
+    if (ret != 0) {
+        return ret;
+    }
+
+    slot = runtime_config_settings.selected_slot == 0 ? 1U : 0U;
+    ret = make_manifest_key(key, sizeof(key), slot);
+    if (ret != 0) {
+        return ret;
+    }
+
+    /* Same as zmk_runtime_config_persist_update(): invalidate the inactive
+     * slot's manifest before touching its chunks, so a slot can never be
+     * read back as valid while its chunks are only partially rewritten. */
+    ret = settings_delete(key);
+    if (ret != 0 && ret != -ENOENT) {
+        return ret;
+    }
+
+    total_chunks = DIV_ROUND_UP(payload_size, CONFIG_ZMK_RUNTIME_CONFIG_SETTINGS_CHUNK_BYTES);
+    chunks_to_write = MIN(chunk_count, total_chunks);
+
+    for (size_t chunk = 0; chunk < chunks_to_write; chunk++) {
+        size_t offset = chunk * CONFIG_ZMK_RUNTIME_CONFIG_SETTINGS_CHUNK_BYTES;
+        size_t length = MIN(CONFIG_ZMK_RUNTIME_CONFIG_SETTINGS_CHUNK_BYTES, payload_size - offset);
+
+        ret = make_chunk_key(key, sizeof(key), slot, chunk);
+        if (ret != 0) {
+            return ret;
+        }
+
+        ret = settings_save_one(key, &payload[offset], length);
+        if (ret != 0) {
+            return ret;
+        }
+    }
+
+    if (!write_manifest) {
+        return 0;
+    }
+
+    memset(&manifest, 0, sizeof(manifest));
+    manifest.magic = RUNTIME_CONFIG_SETTINGS_MANIFEST_MAGIC;
+    manifest.manifest_version = RUNTIME_CONFIG_SETTINGS_MANIFEST_VERSION;
+    manifest.persistence_schema_version = ZMK_RUNTIME_CONFIG_PERSISTENCE_SCHEMA_VERSION;
+    manifest.generation = runtime_config_settings.status.persisted_generation + 1U;
+    if (manifest.generation == 0U) {
+        manifest.generation = 1U;
+    }
+    zmk_runtime_config_get_capabilities(&capabilities);
+    memcpy(manifest.capability_fingerprint, capabilities.capability_fingerprint,
+           sizeof(manifest.capability_fingerprint));
+    manifest.payload_length = payload_size;
+    manifest.chunk_count = total_chunks;
+    manifest.crc32 = crc32_ieee(payload, payload_size);
+
+    ret = make_manifest_key(key, sizeof(key), slot);
+    if (ret != 0) {
+        return ret;
+    }
+
+    return settings_save_one(key, &manifest, sizeof(manifest));
+}
+
+void zmk_runtime_config_test_reload(void) {
+    /* Zero the in-RAM cache first, exactly like a real reboot would start
+     * from zeroed statics, so this run's settings_load() reflects only
+     * what is genuinely in the backing store right now - not anything left
+     * over from an earlier call in this same test process. */
+    memset(&runtime_config_settings, 0, sizeof(runtime_config_settings));
+    runtime_config_settings.selected_slot = -1;
+    (void)settings_load();
+}
+
+#endif /* CONFIG_ZMK_RUNTIME_CONFIG_TEST_HOOKS */
 
 #else
 

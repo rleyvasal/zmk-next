@@ -1,0 +1,96 @@
+#include <dt-bindings/zmk/keys.h>
+#include <behaviors.dtsi>
+#include <dt-bindings/zmk/kscan_mock.h>
+
+/ {
+    chosen {
+        /* Zephyr's own tests/subsys/settings/fcb suite exercises this
+         * exact backend on native_sim the same way - FCB directly over the
+         * flash simulator, no filesystem layer needed. storage_partition
+         * already exists in the shared native_sim.dts base this board
+         * includes; only the chosen node pointing Settings at it is new. */
+        zephyr,settings-partition = &storage_partition;
+    };
+
+    behaviors {
+        rcfg_persist_test: rcfg_persist_test {
+            compatible = "zmk,behavior-runtime-config-persistence-test";
+            #binding-cells = <0>;
+        };
+    };
+
+    keymap {
+        compatible = "zmk,keymap";
+
+        default_layer {
+            bindings = <&rcfg_persist_test &none &none &none>;
+        };
+
+        layer_1 {
+            bindings = <&none &none &none &none>;
+        };
+
+        layer_2 {
+            bindings = <&none &none &none &none>;
+        };
+
+        layer_3 {
+            bindings = <&none &none &none &none>;
+        };
+
+        layer_4 {
+            bindings = <&none &none &none &none>;
+        };
+
+        layer_5 {
+            bindings = <&none &none &none &none>;
+        };
+
+        layer_6 {
+            bindings = <&none &none &none &none>;
+        };
+
+        layer_7 {
+            bindings = <&none &none &none &none>;
+        };
+
+        layer_8 {
+            bindings = <&none &none &none &none>;
+        };
+
+        layer_9 {
+            bindings = <&none &none &none &none>;
+        };
+
+        layer_10 {
+            bindings = <&none &none &none &none>;
+        };
+
+        layer_11 {
+            bindings = <&none &none &none &none>;
+        };
+
+        layer_12 {
+            bindings = <&none &none &none &none>;
+        };
+
+        layer_13 {
+            bindings = <&none &none &none &none>;
+        };
+
+        layer_14 {
+            bindings = <&none &none &none &none>;
+        };
+
+        layer_15 {
+            bindings = <&none &none &none &none>;
+        };
+    };
+};
+
+&kscan {
+    events = <
+        ZMK_MOCK_PRESS(0,0,10)
+        ZMK_MOCK_RELEASE(0,0,10)
+    >;
+};
