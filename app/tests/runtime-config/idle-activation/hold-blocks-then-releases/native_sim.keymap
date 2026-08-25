@@ -27,6 +27,15 @@
 /*
  * CONFIG_ZMK_RUNTIME_CONFIG_ACTIVATION_IDLE_MS defaults to 25ms.
  *
+ * kscan_mock.c's own msec field is a gotcha, confirmed by reading the
+ * driver directly: kscan_mock_work_handler fires an event using
+ * cfg->events[event_index], then reschedules using that *same*,
+ * not-yet-incremented index before finally incrementing it - so an
+ * event's msec value actually governs the gap *after* it fires (before
+ * the next one), not the gap before itself. The delay that matters here
+ * has to sit on the seed's release (the event that starts the idle
+ * countdown), not on the check press that observes the result.
+ *
  *  t=10  seed press    -> requests activation of generation 1, but
  *                         position 0 is still down: not safe, not
  *                         scheduled yet.
@@ -35,8 +44,10 @@
  *                         active, not yet scheduled.
  *  t=30  check release -> position 0 still down alone: still not safe.
  *  t=40  seed release  -> nothing held now: safe, schedules activation
- *                         for t=40+25=65.
- *  t=90  check press   -> well past t=65: activation already completed
+ *                         for t=40+50=90 (its own msec field, per the
+ *                         gotcha above).
+ *  t=90  check press   -> right at the deadline, comfortably past the
+ *                         25ms threshold: activation already completed
  *                         asynchronously, pressed_key_count=1 (this
  *                         press's own).
  */
@@ -45,8 +56,8 @@
         ZMK_MOCK_PRESS(0,0,10)
         ZMK_MOCK_PRESS(0,1,10)
         ZMK_MOCK_RELEASE(0,1,10)
-        ZMK_MOCK_RELEASE(0,0,10)
-        ZMK_MOCK_PRESS(0,1,50)
+        ZMK_MOCK_RELEASE(0,0,50)
+        ZMK_MOCK_PRESS(0,1,10)
         ZMK_MOCK_RELEASE(0,1,10)
     >;
 };
