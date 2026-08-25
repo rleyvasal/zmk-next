@@ -33,7 +33,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
  * of the real one (result->valid / result->error).
  */
 static void report(const char *scenario, int ret,
-                    const struct zmk_runtime_config_validation_result *result) {
+                   const struct zmk_runtime_config_validation_result *result) {
     int failed = ret != 0;
 
     if (result) {
@@ -108,8 +108,7 @@ static int on_binding_released(struct zmk_behavior_binding *binding,
 }
 
 static const struct behavior_driver_api runtime_config_validate_test_driver_api = {
-    .binding_pressed = on_binding_pressed,
-    .binding_released = on_binding_released};
+    .binding_pressed = on_binding_pressed, .binding_released = on_binding_released};
 
 BEHAVIOR_DT_INST_DEFINE(0, NULL, NULL, NULL, NULL, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
                         &runtime_config_validate_test_driver_api);
