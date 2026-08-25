@@ -1,0 +1,2 @@
+s/.*RCFG_MOD_MORPH_TEST //p
+s/.*hid_listener_keycode_//p

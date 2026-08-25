@@ -1,0 +1,32 @@
+#include <dt-bindings/zmk/keys.h>
+#include <behaviors.dtsi>
+#include <dt-bindings/zmk/kscan_mock.h>
+
+/ {
+    behaviors {
+        rcfg_mod_morph_test: rcfg_mod_morph_test {
+            compatible = "zmk,behavior-runtime-config-mod-morph-test";
+            #binding-cells = <0>;
+        };
+    };
+
+    keymap {
+        compatible = "zmk,keymap";
+
+        /* Position 0 seeds and synchronously activates runtime object id 1
+         * (a mod-morph). Position 1 dispatches through it via the existing,
+         * already-shipped &rt behavior - not a new test-only mechanism. */
+        default_layer {
+            bindings = <&rcfg_mod_morph_test &rt 1 &none &none>;
+        };
+    };
+};
+
+&kscan {
+    events = <
+        ZMK_MOCK_PRESS(0,0,10)
+        ZMK_MOCK_RELEASE(0,0,10)
+        ZMK_MOCK_PRESS(0,1,10)
+        ZMK_MOCK_RELEASE(0,1,10)
+    >;
+};
