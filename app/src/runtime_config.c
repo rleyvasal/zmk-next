@@ -596,7 +596,10 @@ static int validate_combo(const struct zmk_runtime_combo_slot *combo,
         set_last_reason("combo timing is out of range");
         return -EINVAL;
     }
-    if (action_to_binding(&combo->output, objects, object_count, true, &binding) != 0) {
+    // A suppress-compiled marker has no real behavior by design - it's a
+    // directive read directly by combo.c's refresh logic, never invoked.
+    if (combo->output.kind != ZMK_RUNTIME_ACTION_SUPPRESS_COMPILED &&
+        action_to_binding(&combo->output, objects, object_count, true, &binding) != 0) {
         set_last_reason("combo output is not a valid action");
         return -EINVAL;
     }
@@ -1118,6 +1121,10 @@ restore_action(const struct runtime_config_persisted_action_ref *action) {
             .kind = ZMK_RUNTIME_ACTION_OBJECT,
             .data.object_id = action->object_id,
         };
+    }
+
+    if (action->kind == ZMK_RUNTIME_ACTION_SUPPRESS_COMPILED) {
+        return (struct zmk_runtime_action_ref){.kind = ZMK_RUNTIME_ACTION_SUPPRESS_COMPILED};
     }
 
     return (struct zmk_runtime_action_ref){0};

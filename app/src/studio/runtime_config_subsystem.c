@@ -110,6 +110,7 @@ static bool encode_runtime_features(pb_ostream_t *stream, const pb_field_t *fiel
         zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_COMBOS,
         zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_COMBO_SLOW_RELEASE,
         zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_COMBO_REQUIRE_PRIOR_IDLE,
+        zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_COMBO_SUPPRESS_COMPILED,
         zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_HOLD_TAPS,
         zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_HOLD_TAP_QUICK_TAP,
         zmk_runtime_config_RuntimeFeature_RUNTIME_FEATURE_HOLD_TAP_REQUIRE_PRIOR_IDLE,
@@ -242,6 +243,10 @@ static bool action_ref_to_wire(const struct zmk_runtime_action_ref *action,
 
         wire_action->which_target = zmk_runtime_config_ActionReference_runtime_object_id_tag;
         wire_action->target.runtime_object_id = action->data.object_id;
+        return true;
+    case ZMK_RUNTIME_ACTION_SUPPRESS_COMPILED:
+        wire_action->which_target = zmk_runtime_config_ActionReference_suppress_compiled_tag;
+        wire_action->target.suppress_compiled = true;
         return true;
     default:
         return false;
@@ -592,10 +597,17 @@ static bool reject_snapshot_content(pb_istream_t *stream, const pb_field_t *fiel
 }
 
 static int decode_action_reference(const zmk_runtime_config_ActionReference *wire_action,
-                                   bool allow_runtime_object,
+                                   bool allow_runtime_object, bool allow_suppress_compiled,
                                    struct zmk_runtime_action_ref *action) {
     if (!wire_action || !action) {
         return -EINVAL;
+    }
+
+    if (allow_suppress_compiled &&
+        wire_action->which_target == zmk_runtime_config_ActionReference_suppress_compiled_tag &&
+        wire_action->target.suppress_compiled) {
+        *action = (struct zmk_runtime_action_ref){.kind = ZMK_RUNTIME_ACTION_SUPPRESS_COMPILED};
+        return 0;
     }
 
     if (wire_action->which_target == zmk_runtime_config_ActionReference_compiled_behavior_tag) {
@@ -646,7 +658,7 @@ static bool decode_keymap_override(pb_istream_t *stream, const pb_field_t *field
 
     if (!wire_override.has_action || wire_override.layer_id > UINT8_MAX ||
         wire_override.key_position > UINT16_MAX ||
-        decode_action_reference(&wire_override.action, true, &override.action) != 0) {
+        decode_action_reference(&wire_override.action, true, false, &override.action) != 0) {
         context->error = -EINVAL;
         return false;
     }
@@ -676,15 +688,15 @@ static bool decode_macro_step(pb_istream_t *stream, const pb_field_t *field, voi
     switch (wire_step.which_instruction) {
     case zmk_runtime_config_MacroStep_tap_tag:
         step.type = ZMK_RUNTIME_MACRO_STEP_TAP;
-        ret = decode_action_reference(&wire_step.instruction.tap, false, &step.data.action);
+        ret = decode_action_reference(&wire_step.instruction.tap, false, false, &step.data.action);
         break;
     case zmk_runtime_config_MacroStep_press_tag:
         step.type = ZMK_RUNTIME_MACRO_STEP_PRESS;
-        ret = decode_action_reference(&wire_step.instruction.press, false, &step.data.action);
+        ret = decode_action_reference(&wire_step.instruction.press, false, false, &step.data.action);
         break;
     case zmk_runtime_config_MacroStep_release_tag:
         step.type = ZMK_RUNTIME_MACRO_STEP_RELEASE;
-        ret = decode_action_reference(&wire_step.instruction.release, false, &step.data.action);
+        ret = decode_action_reference(&wire_step.instruction.release, false, false, &step.data.action);
         break;
     case zmk_runtime_config_MacroStep_wait_ms_tag:
         step.type = ZMK_RUNTIME_MACRO_STEP_WAIT;
@@ -737,9 +749,9 @@ static bool decode_tap_dance_action(pb_istream_t *stream, const pb_field_t *fiel
         return false;
     }
 
-    ret = decode_action_reference(&wire_action.tap_action, false, &action.tap_action);
+    ret = decode_action_reference(&wire_action.tap_action, false, false, &action.tap_action);
     if (ret == 0) {
-        ret = decode_action_reference(&wire_action.hold_action, false, &action.hold_action);
+        ret = decode_action_reference(&wire_action.hold_action, false, false, &action.hold_action);
     }
     if (ret != 0) {
         context->error = ret;
@@ -798,9 +810,9 @@ static bool decode_runtime_object(pb_istream_t *stream, const pb_field_t *field,
                 !pb_decode(&substream, &zmk_runtime_config_ModMorphObject_msg, &wire_mod_morph) ||
                 !pb_close_string_substream(stream, &substream) ||
                 !wire_mod_morph.has_normal_action || !wire_mod_morph.has_morphed_action ||
-                decode_action_reference(&wire_mod_morph.normal_action, false,
+                decode_action_reference(&wire_mod_morph.normal_action, false, false,
                                         &object.data.mod_morph.normal_action) != 0 ||
-                decode_action_reference(&wire_mod_morph.morphed_action, false,
+                decode_action_reference(&wire_mod_morph.morphed_action, false, false,
                                         &object.data.mod_morph.morphed_action) != 0) {
                 context->error = -EINVAL;
                 return false;
@@ -848,9 +860,9 @@ static bool decode_runtime_object(pb_istream_t *stream, const pb_field_t *field,
                     zmk_runtime_config_HoldTapFlavor_HOLD_TAP_FLAVOR_HOLD_PREFERRED ||
                 wire_hold_tap.flavor >
                     zmk_runtime_config_HoldTapFlavor_HOLD_TAP_FLAVOR_TAP_UNLESS_INTERRUPTED ||
-                decode_action_reference(&wire_hold_tap.tap_action, false,
+                decode_action_reference(&wire_hold_tap.tap_action, false, false,
                                         &object.data.hold_tap.tap_action) != 0 ||
-                decode_action_reference(&wire_hold_tap.hold_action, false,
+                decode_action_reference(&wire_hold_tap.hold_action, false, false,
                                         &object.data.hold_tap.hold_action) != 0) {
                 context->error = -EINVAL;
                 return false;
@@ -960,7 +972,7 @@ static bool decode_combo_definition(pb_istream_t *stream, const pb_field_t *fiel
     }
 
     if (wire_combo.id == ZMK_RUNTIME_OBJECT_ID_INVALID || !wire_combo.has_output ||
-        decode_action_reference(&wire_combo.output, true, &combo_context.combo.output) != 0) {
+        decode_action_reference(&wire_combo.output, true, true, &combo_context.combo.output) != 0) {
         snapshot_context->error = -EINVAL;
         set_rpc_error_detail("combo output is missing or invalid");
         return false;

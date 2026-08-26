@@ -193,6 +193,52 @@ static void clear_combo_lookup(size_t index) {
 #endif
 
 #if IS_ENABLED(CONFIG_ZMK_RUNTIME_CONFIG)
+// Order-independent position-set equality: same length, and every compiled
+// position has a match among the runtime combo's positions. Both sides are
+// already in stock/devicetree position space, so no translation is needed
+// here (unlike the runtime-combo insertion loop below, which converts into
+// selected-layout space for the live combo table).
+static bool combo_positions_suppressed_by(const int32_t *compiled_positions,
+                                          int16_t compiled_len,
+                                          const struct zmk_runtime_combo_slot *runtime_combo) {
+    if (!runtime_combo || runtime_combo->key_count != (uint8_t)compiled_len) {
+        return false;
+    }
+
+    for (int16_t i = 0; i < compiled_len; i++) {
+        bool found = false;
+
+        for (uint8_t j = 0; j < runtime_combo->key_count; j++) {
+            if (compiled_positions[i] == (int32_t)runtime_combo->positions[j]) {
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool compiled_combo_is_suppressed(const struct combo_cfg *compiled,
+                                         size_t runtime_combo_count) {
+    for (size_t runtime_index = 0; runtime_index < runtime_combo_count; runtime_index++) {
+        const struct zmk_runtime_combo_slot *source =
+            zmk_runtime_config_get_active_combo(runtime_index);
+
+        if (source && source->output.kind == ZMK_RUNTIME_ACTION_SUPPRESS_COMPILED &&
+            combo_positions_suppressed_by(compiled->key_positions, compiled->key_position_len,
+                                          source)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void zmk_combo_runtime_config_refresh(void) {
     const uint32_t *selected_to_stock;
     size_t runtime_combo_count;
@@ -202,10 +248,17 @@ void zmk_combo_runtime_config_refresh(void) {
         clear_combo_lookup(index);
     }
 
-    combo_count = COMPILED_COMBO_COUNT;
-    memcpy(combos, compiled_combos, COMPILED_COMBO_COUNT * sizeof(combos[0]));
     memset(candidates, 0, sizeof(candidates));
     fully_pressed_combo = INT16_MAX;
+
+    runtime_combo_count = zmk_runtime_config_get_active_combo_count();
+
+    combo_count = 0;
+    for (size_t compiled_index = 0; compiled_index < COMPILED_COMBO_COUNT; compiled_index++) {
+        if (!compiled_combo_is_suppressed(&compiled_combos[compiled_index], runtime_combo_count)) {
+            combos[combo_count++] = compiled_combos[compiled_index];
+        }
+    }
 
     ret = zmk_physical_layouts_get_selected_to_stock_position_map(&selected_to_stock);
     if (ret != ZMK_KEYMAP_LEN) {
@@ -213,12 +266,17 @@ void zmk_combo_runtime_config_refresh(void) {
         return;
     }
 
-    runtime_combo_count = zmk_runtime_config_get_active_combo_count();
     for (size_t runtime_index = 0; runtime_index < runtime_combo_count; runtime_index++) {
         const struct zmk_runtime_combo_slot *source =
             zmk_runtime_config_get_active_combo(runtime_index);
         struct combo_cfg destination = {.runtime = true};
         bool valid = source != NULL;
+
+        // A suppression marker is a directive consumed above, not a live
+        // combo - it has no real behavior and must not be inserted here.
+        if (source && source->output.kind == ZMK_RUNTIME_ACTION_SUPPRESS_COMPILED) {
+            continue;
+        }
 
         if (!source || combo_count >= COMBO_CAPACITY ||
             zmk_runtime_config_action_ref_to_binding(&source->output, &destination.behavior) != 0) {
