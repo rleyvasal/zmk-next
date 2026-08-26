@@ -229,6 +229,10 @@ static bool compiled_combo_is_suppressed(const struct combo_cfg *compiled,
             zmk_runtime_config_get_active_combo(runtime_index);
 
         if (source && source->output.kind == ZMK_RUNTIME_ACTION_SUPPRESS_COMPILED &&
+            // A nonzero mask targets the same compiled-layer scope. Zero is
+            // retained as a wildcard for all-layer and pre-layer-aware
+            // suppression markers already persisted by older builds.
+            (source->layer_mask == 0U || source->layer_mask == compiled->layer_mask) &&
             combo_positions_suppressed_by(compiled->key_positions, compiled->key_position_len,
                                           source)) {
             return true;

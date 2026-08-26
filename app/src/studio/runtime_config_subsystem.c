@@ -524,6 +524,7 @@ zmk_studio_Response begin_runtime_update(const zmk_studio_Request *req) {
     zmk_runtime_config_BeginRuntimeUpdateResponse response =
         zmk_runtime_config_BeginRuntimeUpdateResponse_init_zero;
     uint32_t update_id;
+    uint32_t expected;
     int ret;
 
     if (request->snapshot_sha256.size != 0U) {
@@ -535,8 +536,13 @@ zmk_studio_Response begin_runtime_update(const zmk_studio_Request *req) {
         return studio_response;
     }
 
-    ret = zmk_runtime_config_begin_update(request->expected_active_generation,
-                                          request->snapshot_size, &update_id);
+    expected = request->expected_active_generation;
+    if (expected == 0U) {
+        struct zmk_runtime_config_activation_status activation;
+        zmk_runtime_config_get_activation_status(&activation);
+        expected = activation.active_generation;
+    }
+    ret = zmk_runtime_config_begin_update(expected, request->snapshot_size, &update_id);
     if (ret != 0) {
         zmk_studio_Response studio_response =
             RUNTIME_CONFIG_RESPONSE(begin_runtime_update, response);
@@ -1200,8 +1206,13 @@ zmk_studio_Response reset_runtime_config(const zmk_studio_Request *req) {
     zmk_runtime_config_CommitRuntimeUpdateResult response =
         zmk_runtime_config_CommitRuntimeUpdateResult_init_zero;
     uint32_t update_id = 0U;
-    int ret =
-        zmk_runtime_config_stage_stock_update(request->expected_active_generation, &update_id);
+    uint32_t expected = request->expected_active_generation;
+    if (expected == 0U) {
+        struct zmk_runtime_config_activation_status activation;
+        zmk_runtime_config_get_activation_status(&activation);
+        expected = activation.active_generation;
+    }
+    int ret = zmk_runtime_config_stage_stock_update(expected, &update_id);
 
     if (ret == 0) {
         ret = zmk_runtime_config_persist_update(update_id, &response.generation);
