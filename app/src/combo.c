@@ -198,8 +198,7 @@ static void clear_combo_lookup(size_t index) {
 // already in stock/devicetree position space, so no translation is needed
 // here (unlike the runtime-combo insertion loop below, which converts into
 // selected-layout space for the live combo table).
-static bool combo_positions_suppressed_by(const int32_t *compiled_positions,
-                                          int16_t compiled_len,
+static bool combo_positions_suppressed_by(const int32_t *compiled_positions, int16_t compiled_len,
                                           const struct zmk_runtime_combo_slot *runtime_combo) {
     if (!runtime_combo || runtime_combo->key_count != (uint8_t)compiled_len) {
         return false;

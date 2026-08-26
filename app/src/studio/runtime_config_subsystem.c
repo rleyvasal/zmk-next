@@ -692,11 +692,13 @@ static bool decode_macro_step(pb_istream_t *stream, const pb_field_t *field, voi
         break;
     case zmk_runtime_config_MacroStep_press_tag:
         step.type = ZMK_RUNTIME_MACRO_STEP_PRESS;
-        ret = decode_action_reference(&wire_step.instruction.press, false, false, &step.data.action);
+        ret =
+            decode_action_reference(&wire_step.instruction.press, false, false, &step.data.action);
         break;
     case zmk_runtime_config_MacroStep_release_tag:
         step.type = ZMK_RUNTIME_MACRO_STEP_RELEASE;
-        ret = decode_action_reference(&wire_step.instruction.release, false, false, &step.data.action);
+        ret = decode_action_reference(&wire_step.instruction.release, false, false,
+                                      &step.data.action);
         break;
     case zmk_runtime_config_MacroStep_wait_ms_tag:
         step.type = ZMK_RUNTIME_MACRO_STEP_WAIT;
