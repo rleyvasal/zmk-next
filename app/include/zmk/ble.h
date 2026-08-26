@@ -40,6 +40,11 @@ bool zmk_ble_active_profile_is_open(void);
 bool zmk_ble_active_profile_is_connected(void);
 char *zmk_ble_active_profile_name(void);
 
+/* Totem dual-host helpers (patches/zmk-ble.patch; used by config modules). */
+bool zmk_ble_totem_ads_suppressed(void);
+void zmk_ble_totem_adv_boost_rearm(void);
+void zmk_ble_totem_kick_open_adv(void);
+
 int zmk_ble_unpair_all(void);
 
 int zmk_ble_set_device_name(char *name);
