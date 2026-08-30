@@ -13,7 +13,6 @@
 #include <stdio.h>
 
 #include <zephyr/settings/settings.h>
-#include <zephyr/sys/ring_buffer.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/hci.h>
@@ -47,7 +46,8 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #define PASSKEY_DIGITS 6
 
 static struct bt_conn *auth_passkey_entry_conn;
-RING_BUF_DECLARE(passkey_entries, PASSKEY_DIGITS);
+static uint8_t passkey_entries[PASSKEY_DIGITS];
+static uint8_t passkey_entry_count;
 
 #endif /* IS_ENABLED(CONFIG_ZMK_BLE_PASSKEY_ENTRY) */
 
@@ -180,12 +180,21 @@ bool zmk_ble_profile_is_connected(uint8_t index) {
     if (!bt_addr_le_cmp(addr, BT_ADDR_LE_ANY)) {
         return false;
     } else if ((conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, addr)) != NULL) {
-        bt_conn_get_info(conn, &info);
+        bool connected = bt_conn_get_info(conn, &info) == 0 &&
+                         info.role == BT_CONN_ROLE_PERIPHERAL &&
+                         info.state == BT_CONN_STATE_CONNECTED;
         bt_conn_unref(conn);
-        return info.state == BT_CONN_STATE_CONNECTED;
+        if (connected) {
+            return true;
+        }
     }
 
-    /* RPA-safe fallback: any host conn whose resolved profile is this index. */
+    /* RPA-safe fallback: any host conn whose resolved profile is this index.
+     *
+     * A lookup by the stored identity may briefly return an old, disconnected
+     * connection while the host's current RPA connection is already live. Do
+     * not return false for that stale object: doing so makes endpoint selection
+     * and reconnect recovery treat the active host as disconnected. */
     struct {
         uint8_t index;
         bool found;
@@ -805,7 +814,7 @@ static int adv_throttle_profile_changed_listener(const zmk_event_t *eh) {
         }
         advertising_status = ZMK_ADV_NONE;
     }
-    LOG_INF("Profile changed; advertising for active profile%s%s",
+    LOG_INF("Profile changed; advertising for active profile%s",
 #if IS_ENABLED(CONFIG_TOTEM_DIR_THEN_OPEN)
             " (dir-then-open)"
 #else
@@ -1315,7 +1324,11 @@ static void auth_passkey_entry(struct bt_conn *conn) {
     bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
     LOG_DBG("Passkey entry requested for %s", addr);
-    ring_buf_reset(&passkey_entries);
+    if (auth_passkey_entry_conn) {
+        bt_conn_unref(auth_passkey_entry_conn);
+    }
+
+    passkey_entry_count = 0;
     auth_passkey_entry_conn = bt_conn_ref(conn);
 }
 
@@ -1327,12 +1340,11 @@ static void auth_cancel(struct bt_conn *conn) {
     bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 #if IS_ENABLED(CONFIG_ZMK_BLE_PASSKEY_ENTRY)
-    if (auth_passkey_entry_conn) {
+    if (auth_passkey_entry_conn == conn) {
         bt_conn_unref(auth_passkey_entry_conn);
         auth_passkey_entry_conn = NULL;
+        passkey_entry_count = 0;
     }
-
-    ring_buf_reset(&passkey_entries);
 #endif
 
     LOG_DBG("Pairing cancelled: %s", addr);
@@ -1381,6 +1393,20 @@ static void auth_pairing_complete(struct bt_conn *conn, bool bonded) {
     update_advertising();
 };
 
+static void auth_pairing_failed(struct bt_conn *conn, enum bt_security_err reason) {
+#if IS_ENABLED(CONFIG_ZMK_BLE_PASSKEY_ENTRY)
+    if (auth_passkey_entry_conn == conn) {
+        bt_conn_unref(auth_passkey_entry_conn);
+        auth_passkey_entry_conn = NULL;
+        passkey_entry_count = 0;
+    }
+#else
+    ARG_UNUSED(conn);
+#endif
+
+    LOG_WRN("Pairing failed (reason %d)", reason);
+}
+
 static struct bt_conn_auth_cb zmk_ble_auth_cb_display = {
     .pairing_accept = auth_pairing_accept,
 // .passkey_display = auth_passkey_display,
@@ -1393,6 +1419,7 @@ static struct bt_conn_auth_cb zmk_ble_auth_cb_display = {
 
 static struct bt_conn_auth_info_cb zmk_ble_auth_info_cb_display = {
     .pairing_complete = auth_pairing_complete,
+    .pairing_failed = auth_pairing_failed,
 };
 
 static void zmk_ble_ready(int err) {
@@ -1489,6 +1516,37 @@ static bool zmk_ble_numeric_usage_to_value(const zmk_key_t key, const zmk_key_t 
     return true;
 }
 
+static bool zmk_ble_submit_passkey(void) {
+    if (passkey_entry_count != PASSKEY_DIGITS) {
+        LOG_WRN("Passkey incomplete: %d of %d digits; waiting for remaining digits",
+                passkey_entry_count, PASSKEY_DIGITS);
+        return false;
+    }
+
+    uint32_t passkey = 0;
+
+    for (int i = 0; i < PASSKEY_DIGITS; i++) {
+        passkey = (passkey * 10) + passkey_entries[i];
+    }
+
+    LOG_DBG("Final passkey: %06u", passkey);
+    struct bt_conn *conn = auth_passkey_entry_conn;
+    int err = bt_conn_auth_passkey_entry(conn, passkey);
+    if (err) {
+        LOG_ERR("Failed to submit passkey (err %d)", err);
+        return false;
+    }
+
+    /* Pairing callbacks are normally asynchronous, but only release our
+     * reference here if a callback did not already finish this entry. */
+    if (auth_passkey_entry_conn == conn) {
+        bt_conn_unref(auth_passkey_entry_conn);
+        auth_passkey_entry_conn = NULL;
+        passkey_entry_count = 0;
+    }
+    return true;
+}
+
 static int zmk_ble_handle_key_user(struct zmk_keycode_state_changed *event) {
     zmk_key_t key = event->keycode;
 
@@ -1510,18 +1568,17 @@ static int zmk_ble_handle_key_user(struct zmk_keycode_state_changed *event) {
     }
 
     if (key == HID_USAGE_KEY_KEYBOARD_RETURN || key == HID_USAGE_KEY_KEYBOARD_RETURN_ENTER) {
-        uint8_t digits[PASSKEY_DIGITS];
-        uint32_t count = ring_buf_get(&passkey_entries, digits, PASSKEY_DIGITS);
+        zmk_ble_submit_passkey();
+        return ZMK_EV_EVENT_HANDLED;
+    }
 
-        uint32_t passkey = 0;
-        for (int i = 0; i < count; i++) {
-            passkey = (passkey * 10) + digits[i];
+    if (key == HID_USAGE_KEY_KEYBOARD_DELETE_BACKSPACE) {
+        if (passkey_entry_count > 0) {
+            passkey_entry_count--;
+            LOG_DBG("Passkey digit erased; %d digits remain", passkey_entry_count);
+        } else {
+            LOG_DBG("Passkey is already empty");
         }
-
-        LOG_DBG("Final passkey: %d", passkey);
-        bt_conn_auth_passkey_entry(auth_passkey_entry_conn, passkey);
-        bt_conn_unref(auth_passkey_entry_conn);
-        auth_passkey_entry_conn = NULL;
         return ZMK_EV_EVENT_HANDLED;
     }
 
@@ -1534,13 +1591,13 @@ static int zmk_ble_handle_key_user(struct zmk_keycode_state_changed *event) {
         return ZMK_EV_EVENT_HANDLED;
     }
 
-    if (ring_buf_space_get(&passkey_entries) <= 0) {
-        uint8_t discard_val;
-        ring_buf_get(&passkey_entries, &discard_val, 1);
+    if (passkey_entry_count == PASSKEY_DIGITS) {
+        LOG_DBG("Passkey already has six digits; use Backspace to correct it");
+        return ZMK_EV_EVENT_HANDLED;
     }
-    ring_buf_put(&passkey_entries, &val, 1);
-    LOG_DBG("value entered: %d, digits collected so far: %d", val,
-            ring_buf_size_get(&passkey_entries));
+
+    passkey_entries[passkey_entry_count++] = val;
+    LOG_DBG("value entered: %d, digits collected so far: %d", val, passkey_entry_count);
 
     return ZMK_EV_EVENT_HANDLED;
 }

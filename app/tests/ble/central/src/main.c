@@ -47,6 +47,7 @@ static bool read_directly_on_discovery = false;
 static bool write_hid_indicators_on_discovery = false;
 static bool subscribe_to_pointer_report = false;
 static int32_t wait_on_start = 0;
+static uint32_t fixed_passkey = BT_PASSKEY_INVALID;
 
 static void ble_central_native_posix_options(void) {
     static struct args_struct_t options[] = {
@@ -100,6 +101,11 @@ static void ble_central_native_posix_options(void) {
          .type = 'u',
          .dest = (void *)&wait_on_start,
          .descript = "Time in milliseconds to wait before starting the test process"},
+        {.option = "fixed_passkey",
+         .name = "passkey",
+         .type = 'u',
+         .dest = (void *)&fixed_passkey,
+         .descript = "Display this fixed passkey during pairing"},
         ARG_TABLE_ENDMARKER};
 
     native_add_command_line_opts(options);
@@ -425,6 +431,10 @@ static void connected(struct bt_conn *conn, uint8_t conn_err) {
 static bool first_connect = true;
 static void pairing_complete(struct bt_conn *conn, bool bonded) { LOG_DBG("Pairing complete"); }
 
+static void passkey_display(struct bt_conn *conn, unsigned int passkey) {
+    LOG_DBG("Passkey: %06u", passkey);
+}
+
 static void do_disconnect_of_active(struct k_work *work) {
     bt_conn_disconnect(default_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
     if (clear_bond_on_disconnect) {
@@ -482,6 +492,10 @@ struct bt_conn_auth_info_cb auth_info_cb = {
     .pairing_complete = pairing_complete,
 };
 
+struct bt_conn_auth_cb auth_cb = {
+    .passkey_display = passkey_display,
+};
+
 int main(void) {
     int err;
 
@@ -490,6 +504,20 @@ int main(void) {
     }
 
     err = bt_conn_auth_info_cb_register(&auth_info_cb);
+
+    if (fixed_passkey != BT_PASSKEY_INVALID) {
+        err = bt_conn_auth_cb_register(&auth_cb);
+        if (err) {
+            LOG_DBG("[Authentication callback registration failed] (err %d)", err);
+            return err;
+        }
+
+        err = bt_passkey_set(fixed_passkey);
+        if (err) {
+            LOG_DBG("[Setting fixed passkey failed] (err %d)", err);
+            return err;
+        }
+    }
 
     err = bt_enable(NULL);
 

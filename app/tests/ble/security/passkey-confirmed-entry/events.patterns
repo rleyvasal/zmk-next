@@ -1,0 +1,4 @@
+s/^d_00: .*zmk_ble_submit_passkey: Passkey incomplete: 2 of 6 digits; waiting for remaining digits.*/incomplete passkey rejected/p
+s/^d_00: .*zmk_ble_handle_key_user: Passkey digit erased; 3 digits remain.*/digit erased/p
+s/^d_00: .*zmk_ble_submit_passkey: Final passkey: \([0-9][0-9]*\).*/passkey submitted \1/p
+s/^d_02: .*pairing_complete: Pairing complete.*/pairing complete/p
