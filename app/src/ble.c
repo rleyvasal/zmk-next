@@ -31,6 +31,9 @@
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include <zmk/ble.h>
+#if IS_ENABLED(CONFIG_ZMK_USB)
+#include <zmk/usb.h>
+#endif
 #include <zmk/keys.h>
 #include <zmk/split/bluetooth/uuid.h>
 #include <zmk/event_manager.h>
@@ -502,6 +505,25 @@ static void adv_boost_end_work_handler(struct k_work *work) {
 
 bool zmk_ble_totem_ads_suppressed(void) { return adv_throttled; }
 
+const char *zmk_ble_totem_adv_state(void) {
+    if (adv_throttled) {
+        return "dark";
+    }
+    if (advertising_status == ZMK_ADV_CONN || advertising_status == ZMK_ADV_DIR) {
+        return "on";
+    }
+    return "off";
+}
+
+void zmk_ble_totem_wake_ads(void) {
+    adv_throttled = false;
+    LOG_INF("Wake advertising");
+#if IS_ENABLED(CONFIG_TOTEM_ADV_BOOST)
+    totem_adv_boost_arm();
+#endif
+    update_advertising();
+}
+
 /* Shared: densify or start open ads without clearing throttle/go-dark. */
 static void totem_restart_open_adv_if_running(void) {
     if (adv_throttled) {
@@ -555,6 +577,14 @@ void zmk_ble_totem_kick_open_adv(void) {
  * save power. A key press resumes it (see the listener below). */
 static void adv_throttle_work_handler(struct k_work *work) {
     if (advertising_status == ZMK_ADV_CONN && !zmk_ble_active_profile_is_connected()) {
+#if IS_ENABLED(CONFIG_ZMK_USB)
+        if (zmk_usb_is_powered()) {
+            /* Cable in: do not go dark. Mac BT toggle has nothing to find if we
+             * pause ads, and USB debug needs the radio to keep logging BLE. */
+            k_work_schedule(&adv_throttle_work, K_MINUTES(CONFIG_TOTEM_ADV_THROTTLE_TIMEOUT_MIN));
+            return;
+        }
+#endif
         LOG_INF("Advertising idle timeout; pausing advertising until a key is pressed");
         int err = bt_le_adv_stop();
         if (err) {
@@ -748,6 +778,13 @@ static void update_advertising_callback(struct k_work *work) { update_advertisin
 
 K_WORK_DEFINE(update_advertising_work, update_advertising_callback);
 
+static void update_advertising_delayed(struct k_work *work) {
+    ARG_UNUSED(work);
+    update_advertising();
+}
+
+static K_WORK_DELAYABLE_DEFINE(update_advertising_dwork, update_advertising_delayed);
+
 #if IS_ENABLED(CONFIG_TOTEM_ADV_THROTTLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 /* A key press on either half (the central sees right-half presses over the split
  * link) resumes advertising after the idle throttle paused it. First press or two
@@ -924,6 +961,12 @@ int zmk_ble_prof_select(uint8_t index) {
     if (active_profile == index) {
 #if IS_ENABLED(CONFIG_TOTEM_RESELECT_RECONNECT) && IS_ENABLED(CONFIG_TOTEM_ADV_THROTTLE) &&        \
     IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+#if IS_ENABLED(CONFIG_ZMK_USB)
+        if (zmk_usb_is_powered()) {
+            LOG_INF("Re-select profile %d skipped (USB up)", index);
+            return 0;
+        }
+#endif
         /* Soft recovery: re-selecting the active profile forces disconnect +
          * re-advertise. Helps macOS half-dead "Connected but no typing" without
          * a full Forget + re-pair when the bond itself is still good. */
@@ -956,7 +999,16 @@ int zmk_ble_prof_select(uint8_t index) {
      * listener arms advertising boost, then we (re)start advertising. Avoids
      * advertising for the new profile while the old host still holds a link. */
     raise_profile_changed_event();
-    update_advertising();
+#if IS_ENABLED(CONFIG_ZMK_USB)
+    if (zmk_usb_is_powered()) {
+        /* Do not bt_le_adv_stop/start on the key path — that stalls USB HID.
+         * Existing ads keep running; apply the new profile 50 ms later. */
+        (void)k_work_schedule(&update_advertising_dwork, K_MSEC(50));
+    } else
+#endif
+    {
+        update_advertising();
+    }
 #else
     update_advertising();
     raise_profile_changed_event();
@@ -1626,4 +1678,5 @@ SYS_INIT(zmk_ble_init, APPLICATION, CONFIG_ZMK_BLE_INIT_PRIORITY);
 bool zmk_ble_totem_ads_suppressed(void) { return false; }
 void zmk_ble_totem_adv_boost_rearm(void) {}
 void zmk_ble_totem_kick_open_adv(void) {}
+void zmk_ble_totem_wake_ads(void) {}
 #endif

@@ -12,6 +12,9 @@
 
 #include <zephyr/logging/log.h>
 #include <zmk/studio/rpc.h>
+#if IS_ENABLED(CONFIG_ZMK_USB)
+#include <zmk/usb.h>
+#endif
 
 LOG_MODULE_DECLARE(zmk_studio, CONFIG_ZMK_STUDIO_LOG_LEVEL);
 
@@ -19,6 +22,21 @@ LOG_MODULE_DECLARE(zmk_studio, CONFIG_ZMK_STUDIO_LOG_LEVEL);
 #define UART_DEVICE_NODE DT_CHOSEN(zmk_studio_rpc_uart)
 
 static const struct device *const uart_dev = DEVICE_DT_GET(UART_DEVICE_NODE);
+static bool uart_host_open;
+
+void zmk_studio_uart_rearm(void) {
+    if (!device_is_ready(uart_dev)) {
+        return;
+    }
+#if IS_ENABLED(CONFIG_UART_INTERRUPT_DRIVEN)
+    /* RX only. TX irq is enabled from tx_notify when a frame is queued.
+     * Do not set DCD/DSR here: that is a USB control transfer every call
+     * and stalls HID if we poll. */
+    uart_irq_rx_enable(uart_dev);
+#endif
+}
+
+bool zmk_studio_uart_host_open(void) { return uart_host_open; }
 
 static void tx_notify(struct ring_buf *tx_ring_buf, size_t written, bool msg_done,
                       void *user_data) {
@@ -70,9 +88,8 @@ K_THREAD_DEFINE(uart_transport_read_thread, CONFIG_ZMK_STUDIO_TRANSPORT_UART_RX_
 #endif
 
 static int start_rx() {
-#if IS_ENABLED(CONFIG_UART_INTERRUPT_DRIVEN)
-    uart_irq_rx_enable(uart_dev);
-#else
+    zmk_studio_uart_rearm();
+#if !IS_ENABLED(CONFIG_UART_INTERRUPT_DRIVEN)
     k_thread_resume(uart_transport_read_thread);
 #endif
     return 0;
@@ -111,6 +128,9 @@ static void serial_cb(const struct device *dev, void *user_data) {
                 last_read = uart_fifo_read(uart_dev, buffer, len);
 
                 ring_buf_put_finish(buf, last_read);
+                if (last_read) {
+                    uart_host_open = true;
+                }
             } else {
                 LOG_ERR("Dropping incoming RPC byte, insufficient room in the RX buffer. Bump "
                         "CONFIG_ZMK_STUDIO_RPC_RX_BUF_SIZE.");
@@ -130,12 +150,20 @@ static void serial_cb(const struct device *dev, void *user_data) {
             uint32_t claim_len = ring_buf_get_claim(tx_buf, &buf, tx_buf->size);
 
             if (claim_len == 0) {
-                continue;
+                break;
             }
 
             int sent = uart_fifo_fill(uart_dev, buf, claim_len);
+            if (sent <= 0) {
+                /* CDC ring full or host not polling — do not spin the USB workqueue. */
+                ring_buf_get_finish(tx_buf, 0);
+                break;
+            }
 
-            ring_buf_get_finish(tx_buf, MAX(sent, 0));
+            ring_buf_get_finish(tx_buf, sent);
+        }
+        if (ring_buf_size_get(tx_buf) == 0) {
+            uart_irq_tx_disable(uart_dev);
         }
     }
 }

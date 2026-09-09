@@ -8,6 +8,7 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/util.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/bluetooth/services/bas.h>
 
@@ -19,12 +20,66 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/battery.h>
 #include <zmk/events/battery_state_changed.h>
 #include <zmk/events/activity_state_changed.h>
+#if IS_ENABLED(CONFIG_ZMK_USB)
+#include <zmk/events/usb_conn_state_changed.h>
+#include <zmk/usb.h>
+#endif
 #include <zmk/activity.h>
 #include <zmk/workqueue.h>
+#if IS_ENABLED(CONFIG_SETTINGS)
+#include <zephyr/settings/settings.h>
+#endif
 
 static uint8_t last_state_of_charge = 0;
+static uint8_t last_cell_soc;
+static bool have_last_cell;
+static uint16_t last_millivolts;
 
 uint8_t zmk_battery_state_of_charge(void) { return last_state_of_charge; }
+
+int zmk_battery_last_cell_soc(void) { return have_last_cell ? (int)last_cell_soc : -1; }
+
+uint16_t zmk_battery_millivolts(void) { return last_millivolts; }
+
+static void remember_cell_soc(uint8_t soc) {
+#if IS_ENABLED(CONFIG_ZMK_USB)
+    if (zmk_usb_is_powered()) {
+        return;
+    }
+#endif
+    last_cell_soc = soc;
+    have_last_cell = true;
+}
+
+#if IS_ENABLED(CONFIG_SETTINGS)
+static void persist_cell_soc(void) {
+    if (!have_last_cell) {
+        return;
+    }
+    int rc = settings_save_one("zmk/batt/cell", &last_cell_soc, sizeof(last_cell_soc));
+    if (rc != 0) {
+        LOG_WRN("Failed to persist last cell SoC (%d)", rc);
+    }
+}
+
+static int batt_settings_set(const char *name, size_t len, settings_read_cb read_cb, void *cb_arg) {
+    const char *next;
+
+    if (settings_name_steq(name, "cell", &next) && !next) {
+        if (len != sizeof(last_cell_soc)) {
+            return -EINVAL;
+        }
+        int rc = read_cb(cb_arg, &last_cell_soc, sizeof(last_cell_soc));
+        if (rc >= 0) {
+            have_last_cell = true;
+        }
+        return MIN(rc, 0);
+    }
+    return -ENOENT;
+}
+
+SETTINGS_STATIC_HANDLER_DEFINE(zmk_batt, "zmk/batt", NULL, batt_settings_set, NULL, NULL);
+#endif
 
 #if DT_HAS_CHOSEN(zmk_battery)
 static const struct device *const battery = DEVICE_DT_GET(DT_CHOSEN(zmk_battery));
@@ -84,6 +139,7 @@ static int zmk_battery_update(const struct device *battery) {
     }
 
     uint16_t mv = voltage.val1 * 1000 + (voltage.val2 / 1000);
+    last_millivolts = mv;
     state_of_charge.val1 = lithium_ion_mv_to_pct(mv);
 
     LOG_DBG("State of change %d from %d mv", state_of_charge.val1, mv);
@@ -102,8 +158,16 @@ static int zmk_battery_update(const struct device *battery) {
             return rc;
         }
     }
+    remember_cell_soc(last_state_of_charge);
 
-#if IS_ENABLED(CONFIG_BT_BAS)
+#if IS_ENABLED(CONFIG_BT_BAS) && !IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_PROXY)
+#if IS_ENABLED(CONFIG_ZMK_USB)
+    /* USB holds the cell at charge voltage; lithium_ion_mv_to_pct maps
+     * >= 4200 mV to 100%. Do not publish that as the host-facing SoC. */
+    if (zmk_usb_is_powered()) {
+        /* leave BAS at the last on-battery sample */
+    } else
+#endif
     if (bt_bas_get_battery_level() != last_state_of_charge) {
         LOG_DBG("Setting BAS GATT battery level to %d.", last_state_of_charge);
 
@@ -162,6 +226,18 @@ static int zmk_battery_init(void) {
 }
 
 static int battery_event_listener(const zmk_event_t *eh) {
+#if IS_ENABLED(CONFIG_ZMK_USB)
+    if (as_zmk_usb_conn_state_changed(eh)) {
+        if (!zmk_usb_is_powered()) {
+            k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &battery_work);
+        } else {
+#if IS_ENABLED(CONFIG_SETTINGS)
+            persist_cell_soc();
+#endif
+        }
+        return 0;
+    }
+#endif
 
     if (as_zmk_activity_state_changed(eh)) {
         switch (zmk_activity_get_state()) {
@@ -182,5 +258,8 @@ static int battery_event_listener(const zmk_event_t *eh) {
 ZMK_LISTENER(battery, battery_event_listener);
 
 ZMK_SUBSCRIPTION(battery, zmk_activity_state_changed);
+#if IS_ENABLED(CONFIG_ZMK_USB)
+ZMK_SUBSCRIPTION(battery, zmk_usb_conn_state_changed);
+#endif
 
 SYS_INIT(zmk_battery_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);

@@ -42,8 +42,11 @@ char *zmk_ble_active_profile_name(void);
 
 /* Totem dual-host helpers (patches/zmk-ble.patch; used by config modules). */
 bool zmk_ble_totem_ads_suppressed(void);
+/* "on" (undirected/directed ads), "dark" (throttle), or "off". */
+const char *zmk_ble_totem_adv_state(void);
 void zmk_ble_totem_adv_boost_rearm(void);
 void zmk_ble_totem_kick_open_adv(void);
+void zmk_ble_totem_wake_ads(void);
 
 int zmk_ble_unpair_all(void);
 

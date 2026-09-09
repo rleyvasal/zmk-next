@@ -14,6 +14,9 @@
 #include <zmk/hid.h>
 #include <dt-bindings/zmk/hid_usage_pages.h>
 #include <zmk/usb_hid.h>
+#if IS_ENABLED(CONFIG_ZMK_USB)
+#include <zmk/usb.h>
+#endif
 #include <zmk/hog.h>
 #include <zmk/endpoints.h>
 #include <zmk/event_manager.h>
@@ -127,14 +130,13 @@ int zmk_endpoint_instance_to_index(struct zmk_endpoint_instance endpoint) {
 int zmk_endpoint_set_preferred_transport(enum zmk_transport transport) {
     LOG_DBG("Selected endpoint transport %d", transport);
 
-    if (preferred_transport == transport) {
-        return 0;
+    if (preferred_transport != transport) {
+        preferred_transport = transport;
+        endpoints_save_preferred();
     }
 
-    preferred_transport = transport;
-
-    endpoints_save_preferred();
-
+    /* Always re-evaluate. Preferred can already be USB while selected is still
+     * BLE because HID was not ready yet (cable in, Mac still linked). */
     update_current_endpoint();
 
     return 0;
@@ -432,6 +434,14 @@ static enum zmk_transport get_selected_transport(void) {
             LOG_DBG("USB is preferred and ready");
             return ZMK_TRANSPORT_USB;
         }
+#if IS_ENABLED(CONFIG_ZMK_USB)
+        /* Cable in: do not send keystrokes to BLE. macOS drops BLE HID when a
+         * USB keyboard of the same device appears, so fallback = no typing. */
+        if (zmk_usb_is_powered()) {
+            LOG_DBG("USB preferred and powered; waiting for HID (not falling back to BLE)");
+            return ZMK_TRANSPORT_NONE;
+        }
+#endif
         if (is_ble_ready()) {
             LOG_DBG("USB is not ready. Falling back to BLE");
             return ZMK_TRANSPORT_BLE;

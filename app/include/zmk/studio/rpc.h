@@ -219,6 +219,14 @@ struct ring_buf *zmk_rpc_get_tx_buf(void);
 struct ring_buf *zmk_rpc_get_rx_buf(void);
 void zmk_rpc_rx_notify(void);
 
+/** Send one framed payload (already unescaped inner bytes) on the active Studio transport. */
+int zmk_rpc_tx_raw_payload(const uint8_t *payload, size_t len);
+
+/** Re-enable Studio UART IRQs after USB CDC is configured (boot race). */
+void zmk_studio_uart_rearm(void);
+/** True after the host has written to the Studio CDC (port is open). */
+bool zmk_studio_uart_host_open(void);
+
 #define ZMK_RPC_TRANSPORT(name, _transport, _rx_start, _rx_stop, _tx_user_data, _tx_notify)        \
     STRUCT_SECTION_ITERABLE(zmk_rpc_transport, name) = {                                           \
         .transport = _transport,                                                                   \

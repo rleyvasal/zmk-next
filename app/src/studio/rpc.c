@@ -89,8 +89,19 @@ struct ring_buf *zmk_rpc_get_rx_buf(void) { return &rpc_rx_buf; }
 
 void zmk_rpc_rx_notify(void) { k_sem_give(&rpc_rx_sem); }
 
+/* Weak: totem_studio_log.c handles 'C' USB log on/off frames. */
+__attribute__((weak)) void zmk_studio_control_payload(const uint8_t *payload, size_t len) {
+    ARG_UNUSED(payload);
+    ARG_UNUSED(len);
+}
+
+#define STUDIO_CTL_PREFIX ((uint8_t)'C')
+
 static bool rpc_read_cb(pb_istream_t *stream, uint8_t *buf, size_t count) {
     uint32_t write_offset = 0;
+    static bool ctl_frame;
+    static uint8_t ctl_buf[8];
+    static uint8_t ctl_len;
 
     do {
         uint8_t *buffer;
@@ -99,7 +110,17 @@ static bool rpc_read_cb(pb_istream_t *stream, uint8_t *buf, size_t count) {
         if (len > 0) {
             for (int i = 0; i < len; i++) {
                 if (studio_framing_process_byte(&rpc_framing_state, buffer[i])) {
-                    buf[write_offset++] = buffer[i];
+                    if (!ctl_frame && write_offset == 0 && buffer[i] == STUDIO_CTL_PREFIX) {
+                        ctl_frame = true;
+                        ctl_len = 0;
+                    }
+                    if (ctl_frame) {
+                        if (ctl_len < sizeof(ctl_buf)) {
+                            ctl_buf[ctl_len++] = buffer[i];
+                        }
+                    } else {
+                        buf[write_offset++] = buffer[i];
+                    }
                 }
             }
         } else {
@@ -110,6 +131,11 @@ static bool rpc_read_cb(pb_istream_t *stream, uint8_t *buf, size_t count) {
     } while (write_offset < count && rpc_framing_state != FRAMING_STATE_EOF);
 
     if (rpc_framing_state == FRAMING_STATE_EOF) {
+        if (ctl_frame) {
+            zmk_studio_control_payload(ctl_buf, ctl_len);
+            ctl_frame = false;
+            ctl_len = 0;
+        }
         stream->bytes_left = 0;
         return false;
     } else {
@@ -222,6 +248,41 @@ exit:
     return ret;
 }
 
+int zmk_rpc_tx_raw_payload(const uint8_t *payload, size_t len) {
+    int ret = 0;
+
+    if (!payload || len == 0) {
+        return -EINVAL;
+    }
+
+    k_mutex_lock(&rpc_transport_mutex, K_FOREVER);
+
+    if (!selected_transport) {
+        ret = -ENOTCONN;
+        goto exit_raw;
+    }
+
+    void *user_data = selected_transport->tx_user_data ? selected_transport->tx_user_data() : NULL;
+    pb_ostream_t stream = pb_ostream_for_tx_buf(user_data);
+    uint8_t framing_byte = FRAMING_SOF;
+
+    ring_buf_put(&rpc_tx_buf, &framing_byte, 1);
+    selected_transport->tx_notify(&rpc_tx_buf, 1, false, user_data);
+
+    if (!rpc_tx_buffer_write(&stream, payload, len)) {
+        ret = -ENOMEM;
+        goto exit_raw;
+    }
+
+    framing_byte = FRAMING_EOF;
+    ring_buf_put(&rpc_tx_buf, &framing_byte, 1);
+    selected_transport->tx_notify(&rpc_tx_buf, 1, true, user_data);
+
+exit_raw:
+    k_mutex_unlock(&rpc_transport_mutex);
+    return ret;
+}
+
 static void rpc_main(void) {
     for (;;) {
         pb_istream_t stream = pb_istream_for_rx_ring_buf();
@@ -258,6 +319,10 @@ static void refresh_selected_transport(void) {
     k_mutex_lock(&rpc_transport_mutex, K_FOREVER);
 
     if (selected_transport && selected_transport->transport == transport) {
+        /* USB CDC IRQs enabled before configuration are a no-op. Re-arm. */
+        if (selected_transport->rx_start) {
+            selected_transport->rx_start();
+        }
         goto exit_refresh;
     }
 
