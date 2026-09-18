@@ -956,17 +956,10 @@ static void split_central_disconnected(struct bt_conn *conn, uint8_t reason) {
 
     LOG_DBG("Disconnected: %s (reason %d)", addr, reason);
 
-#if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING)
-    struct peripheral_event_wrapper ev = {
-        .source = peripheral_slot_index_for_conn(conn),
-        .event = {.type = ZMK_SPLIT_TRANSPORT_PERIPHERAL_EVENT_TYPE_BATTERY_EVENT,
-                  .data = {.battery_event = {
-                               .level = 0,
-                           }}}};
-
-    k_msgq_put(&peripheral_event_msgq, &ev, K_NO_WAIT);
-    k_work_submit(&peripheral_event_work);
-#endif // IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING)
+    /* A disconnect has no battery measurement. Do not turn the last valid
+     * peripheral BAS value into a false 0%: consumers use this event for
+     * both the Studio readout and the host-facing BAS proxy. A fresh GATT
+     * read after reconnection will replace the retained value. */
 
 #if IS_ENABLED(CONFIG_ZMK_INPUT_SPLIT)
     release_peripheral_input_subs(conn);
