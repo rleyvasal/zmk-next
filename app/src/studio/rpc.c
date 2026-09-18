@@ -96,6 +96,7 @@ __attribute__((weak)) void zmk_studio_control_payload(const uint8_t *payload, si
 }
 
 #define STUDIO_CTL_PREFIX ((uint8_t)'C')
+#define STUDIO_DIAG_PREFIX ((uint8_t)'D')
 
 static bool rpc_read_cb(pb_istream_t *stream, uint8_t *buf, size_t count) {
     uint32_t write_offset = 0;
@@ -110,7 +111,8 @@ static bool rpc_read_cb(pb_istream_t *stream, uint8_t *buf, size_t count) {
         if (len > 0) {
             for (int i = 0; i < len; i++) {
                 if (studio_framing_process_byte(&rpc_framing_state, buffer[i])) {
-                    if (!ctl_frame && write_offset == 0 && buffer[i] == STUDIO_CTL_PREFIX) {
+                    if (!ctl_frame && write_offset == 0 &&
+                        (buffer[i] == STUDIO_CTL_PREFIX || buffer[i] == STUDIO_DIAG_PREFIX)) {
                         ctl_frame = true;
                         ctl_len = 0;
                     }
