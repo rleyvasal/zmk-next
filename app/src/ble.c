@@ -33,6 +33,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/ble.h>
 #if IS_ENABLED(CONFIG_ZMK_USB)
 #include <zmk/usb.h>
+#include <zmk/events/usb_conn_state_changed.h>
 #endif
 #include <zmk/keys.h>
 #include <zmk/split/bluetooth/uuid.h>
@@ -503,10 +504,19 @@ static void adv_boost_end_work_handler(struct k_work *work) {
 /* Totem dual-host helpers (config modules: reconnect_watch / exclusive_host).
  * Never clear adv_throttled / idle_go_dark — that would resurrect overnight ads. */
 
-bool zmk_ble_totem_ads_suppressed(void) { return adv_throttled; }
+bool zmk_ble_totem_ads_suppressed(void) {
+#if IS_ENABLED(CONFIG_ZMK_USB)
+    /* This is host advertising only; the central-to-peripheral split link is
+     * independent and remains available while the cable is connected. */
+    if (zmk_usb_is_powered()) {
+        return true;
+    }
+#endif
+    return adv_throttled;
+}
 
 const char *zmk_ble_totem_adv_state(void) {
-    if (adv_throttled) {
+    if (zmk_ble_totem_ads_suppressed()) {
         return "dark";
     }
     if (advertising_status == ZMK_ADV_CONN || advertising_status == ZMK_ADV_DIR) {
@@ -526,7 +536,7 @@ void zmk_ble_totem_wake_ads(void) {
 
 /* Shared: densify or start open ads without clearing throttle/go-dark. */
 static void totem_restart_open_adv_if_running(void) {
-    if (adv_throttled) {
+    if (zmk_ble_totem_ads_suppressed()) {
         return;
     }
     if (zmk_ble_active_profile_is_connected()) {
@@ -552,7 +562,7 @@ void zmk_ble_totem_adv_boost_rearm(void) {
     totem_restart_open_adv_if_running();
 #else
     /* Boost disabled: still kick open ads if dark (without densify restart). */
-    if (!adv_throttled && !zmk_ble_active_profile_is_connected() &&
+    if (!zmk_ble_totem_ads_suppressed() && !zmk_ble_active_profile_is_connected() &&
         advertising_status != ZMK_ADV_CONN && advertising_status != ZMK_ADV_DIR) {
         update_advertising();
     }
@@ -560,7 +570,7 @@ void zmk_ble_totem_adv_boost_rearm(void) {
 }
 
 void zmk_ble_totem_kick_open_adv(void) {
-    if (adv_throttled) {
+    if (zmk_ble_totem_ads_suppressed()) {
         return;
     }
     if (zmk_ble_active_profile_is_connected()) {
@@ -689,6 +699,14 @@ int update_advertising(void) {
         desired_adv = ZMK_ADV_CONN;
 #endif
     }
+#if IS_ENABLED(CONFIG_ZMK_USB) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    /* USB HID and host BLE connection events contend for the same nRF52
+     * scheduling budget. Keep the split radio link, but do not accept a
+     * computer connection while cable HID is active. */
+    if (zmk_usb_is_powered()) {
+        desired_adv = ZMK_ADV_NONE;
+    }
+#endif
     LOG_DBG("advertising from %d to %d", advertising_status, desired_adv);
 
 #if IS_ENABLED(CONFIG_TOTEM_ADV_THROTTLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
@@ -778,6 +796,17 @@ static void update_advertising_callback(struct k_work *work) { update_advertisin
 
 K_WORK_DEFINE(update_advertising_work, update_advertising_callback);
 
+#if IS_ENABLED(CONFIG_ZMK_USB) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+static int totem_usb_host_adv_listener(const zmk_event_t *eh) {
+    ARG_UNUSED(eh);
+    k_work_submit(&update_advertising_work);
+    return ZMK_EV_EVENT_BUBBLE;
+}
+
+ZMK_LISTENER(totem_usb_host_adv, totem_usb_host_adv_listener);
+ZMK_SUBSCRIPTION(totem_usb_host_adv, zmk_usb_conn_state_changed);
+#endif
+
 static void update_advertising_delayed(struct k_work *work) {
     ARG_UNUSED(work);
     update_advertising();
@@ -804,6 +833,11 @@ static int adv_throttle_keypress_listener(const zmk_event_t *eh) {
     k_work_reschedule(&idle_disconnect_work, K_MINUTES(CONFIG_TOTEM_IDLE_DISCONNECT_MIN));
 #endif
     if (adv_throttled) {
+#if IS_ENABLED(CONFIG_ZMK_USB)
+        if (zmk_usb_is_powered()) {
+            return ZMK_EV_EVENT_BUBBLE;
+        }
+#endif
         adv_throttled = false;
         LOG_INF("Key pressed; resuming advertising");
 #if (CONFIG_TOTEM_EVICT_ADV_COOLDOWN_MS > 0)
@@ -1675,7 +1709,13 @@ SYS_INIT(zmk_ble_init, APPLICATION, CONFIG_ZMK_BLE_INIT_PRIORITY);
 /* Totem helpers when throttle patch path is not compiled (peripheral half, or
  * TOTEM_ADV_THROTTLE=n). Real implementations live inside the throttle block. */
 #if !(IS_ENABLED(CONFIG_TOTEM_ADV_THROTTLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL))
-bool zmk_ble_totem_ads_suppressed(void) { return false; }
+bool zmk_ble_totem_ads_suppressed(void) {
+#if IS_ENABLED(CONFIG_ZMK_USB) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    return zmk_usb_is_powered();
+#else
+    return false;
+#endif
+}
 void zmk_ble_totem_adv_boost_rearm(void) {}
 void zmk_ble_totem_kick_open_adv(void) {}
 void zmk_ble_totem_wake_ads(void) {}
