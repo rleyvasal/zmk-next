@@ -1111,7 +1111,14 @@ struct bt_conn *zmk_ble_active_profile_conn(void) {
         LOG_WRN("Not sending, no active address for current profile");
         return NULL;
     } else if ((conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, addr)) != NULL) {
-        return conn;
+        struct bt_conn_info info;
+        bool connected = bt_conn_get_info(conn, &info) == 0 &&
+                         info.role == BT_CONN_ROLE_PERIPHERAL &&
+                         info.state == BT_CONN_STATE_CONNECTED;
+        if (connected) {
+            return conn;
+        }
+        bt_conn_unref(conn);
     }
 
     /* Fallback: RPA / identity lag — find a live host conn that maps to the
