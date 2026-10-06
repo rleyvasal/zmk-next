@@ -655,7 +655,11 @@ if ZMK_LOW_PRIORITY_WORK_QUEUE
 
 config ZMK_LOW_PRIORITY_THREAD_STACK_SIZE
     int "Low priority thread stack size"
+    default 1536 if ZMK_BATTERY_REPORTING && SETTINGS && ZMK_USB
     default 768
+    help
+      Battery persistence uses this queue on USB keyboards. Allow room for
+      settings/NVS garbage collection and the radio-aware flash driver.
 
 config ZMK_LOW_PRIORITY_THREAD_PRIORITY
     int "Low priority thread priority"

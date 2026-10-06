@@ -52,7 +52,8 @@ static void remember_cell_soc(uint8_t soc) {
 }
 
 #if IS_ENABLED(CONFIG_SETTINGS)
-static void persist_cell_soc(void) {
+static void persist_cell_soc(struct k_work *work) {
+    ARG_UNUSED(work);
     if (!have_last_cell) {
         return;
     }
@@ -61,6 +62,8 @@ static void persist_cell_soc(void) {
         LOG_WRN("Failed to persist last cell SoC (%d)", rc);
     }
 }
+
+static K_WORK_DEFINE(persist_cell_soc_work, persist_cell_soc);
 
 static int batt_settings_set(const char *name, size_t len, settings_read_cb read_cb, void *cb_arg) {
     const char *next;
@@ -232,7 +235,10 @@ static int battery_event_listener(const zmk_event_t *eh) {
             k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &battery_work);
         } else {
 #if IS_ENABLED(CONFIG_SETTINGS)
-            persist_cell_soc();
+            /* USB events run on the system queue, which Bluetooth needs while
+             * settings_load() owns the settings lock. Save on the battery queue
+             * so waiting for that lock cannot stall HCI command processing. */
+            k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &persist_cell_soc_work);
 #endif
         }
         return 0;

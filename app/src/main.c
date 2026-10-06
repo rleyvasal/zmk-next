@@ -8,9 +8,12 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/settings/settings.h>
+#include <zmk/settings.h>
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(zmk, CONFIG_ZMK_LOG_LEVEL);
+
+__weak void zmk_settings_loaded(void) {}
 
 #if IS_ENABLED(CONFIG_ZMK_DISPLAY)
 
@@ -23,8 +26,9 @@ int main(void) {
     LOG_INF("Welcome to ZMK!\n");
 
 #if IS_ENABLED(CONFIG_SETTINGS)
-    settings_subsys_init();
-    settings_load();
+    if (settings_subsys_init() == 0 && settings_load() == 0) {
+        zmk_settings_loaded();
+    }
 #endif
 
 #ifdef CONFIG_ZMK_DISPLAY
