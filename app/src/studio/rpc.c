@@ -257,28 +257,51 @@ int zmk_rpc_tx_raw_payload(const uint8_t *payload, size_t len) {
         return -EINVAL;
     }
 
-    k_mutex_lock(&rpc_transport_mutex, K_FOREVER);
+    /* Diagnostic traffic must never stall the workqueue used by Bluetooth. */
+    if (k_mutex_lock(&rpc_transport_mutex, K_NO_WAIT) != 0) {
+        return -EAGAIN;
+    }
 
     if (!selected_transport) {
         ret = -ENOTCONN;
         goto exit_raw;
     }
 
-    void *user_data = selected_transport->tx_user_data ? selected_transport->tx_user_data() : NULL;
-    pb_ostream_t stream = pb_ostream_for_tx_buf(user_data);
-    uint8_t framing_byte = FRAMING_SOF;
-
-    ring_buf_put(&rpc_tx_buf, &framing_byte, 1);
-    selected_transport->tx_notify(&rpc_tx_buf, 1, false, user_data);
-
-    if (!rpc_tx_buffer_write(&stream, payload, len)) {
-        ret = -ENOMEM;
+    size_t capacity = ring_buf_capacity_get(&rpc_tx_buf);
+    if (len > capacity - 2) {
+        ret = -EMSGSIZE;
+        goto exit_raw;
+    }
+    size_t frame_len = len + 2;
+    for (size_t i = 0; i < len; i++) {
+        if (payload[i] == FRAMING_SOF || payload[i] == FRAMING_ESC || payload[i] == FRAMING_EOF) {
+            frame_len++;
+        }
+    }
+    if (frame_len > capacity) {
+        ret = -EMSGSIZE;
+        goto exit_raw;
+    }
+    /* Check the complete escaped frame before writing anything. Other
+     * producers hold this mutex; the UART consumer can only free space. */
+    if (frame_len > ring_buf_space_get(&rpc_tx_buf)) {
+        ret = -EAGAIN;
         goto exit_raw;
     }
 
+    uint8_t framing_byte = FRAMING_SOF;
+    ring_buf_put(&rpc_tx_buf, &framing_byte, 1);
+    for (size_t i = 0; i < len; i++) {
+        if (payload[i] == FRAMING_SOF || payload[i] == FRAMING_ESC || payload[i] == FRAMING_EOF) {
+            framing_byte = FRAMING_ESC;
+            ring_buf_put(&rpc_tx_buf, &framing_byte, 1);
+        }
+        ring_buf_put(&rpc_tx_buf, &payload[i], 1);
+    }
     framing_byte = FRAMING_EOF;
     ring_buf_put(&rpc_tx_buf, &framing_byte, 1);
-    selected_transport->tx_notify(&rpc_tx_buf, 1, true, user_data);
+    void *user_data = selected_transport->tx_user_data ? selected_transport->tx_user_data() : NULL;
+    selected_transport->tx_notify(&rpc_tx_buf, frame_len, true, user_data);
 
 exit_raw:
     k_mutex_unlock(&rpc_transport_mutex);
