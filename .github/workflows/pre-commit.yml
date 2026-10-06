@@ -16,4 +16,10 @@ jobs:
         run: python app/tests/studio/raw_tx/test_raw_tx.py -v
       - name: Test active BLE connection lookup
         run: python app/tests/ble/active_connection/test_active_connection.py -v
+      - name: Test advertising on profile and link changes
+        run: python app/tests/ble/profile_notifications/test_profile_notifications.py -v
+      - name: Test post-settings startup barrier
+        run: python app/tests/settings/startup/test_settings_loaded.py -v
+      - name: Test battery persistence during USB startup
+        run: python app/tests/battery/persistence/test_persistence.py -v
       - uses: pre-commit/action@v3.0.1

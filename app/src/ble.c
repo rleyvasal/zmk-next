@@ -858,8 +858,15 @@ ZMK_SUBSCRIPTION(totem_adv_throttle, zmk_position_state_changed);
  * advertise for the newly selected profile immediately. Without this, a switch
  * while dark (or a race that left adv_throttled set) waits for another keypress
  * before the target host can see the keyboard. */
+static uint8_t adv_profile_index;
+
 static int adv_throttle_profile_changed_listener(const zmk_event_t *eh) {
     ARG_UNUSED(eh);
+    /* This event also reports link changes for the same selected profile. */
+    if (adv_profile_index == active_profile) {
+        return ZMK_EV_EVENT_BUBBLE;
+    }
+    adv_profile_index = active_profile;
 #if IS_ENABLED(CONFIG_TOTEM_IDLE_DISCONNECT)
     idle_go_dark = false;
 #endif
@@ -1526,6 +1533,11 @@ static void zmk_ble_ready(int err) {
 }
 
 static int zmk_ble_complete_startup(void) {
+
+#if IS_ENABLED(CONFIG_TOTEM_ADV_THROTTLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    /* Start from the restored profile, even before its first connection. */
+    adv_profile_index = active_profile;
+#endif
 
 #if IS_ENABLED(CONFIG_ZMK_BLE_CLEAR_BONDS_ON_START)
     LOG_WRN("Clearing all existing BLE bond information from the keyboard");
