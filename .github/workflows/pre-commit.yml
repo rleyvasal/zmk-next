@@ -14,4 +14,6 @@ jobs:
           python-version: 3.x
       - name: Test non-blocking diagnostic transmission
         run: python app/tests/studio/raw_tx/test_raw_tx.py -v
+      - name: Test active BLE connection lookup
+        run: python app/tests/ble/active_connection/test_active_connection.py -v
       - uses: pre-commit/action@v3.0.1
