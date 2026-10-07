@@ -24,11 +24,23 @@ HARNESS = r"""
 #define LOG_WRN(...) ((void)0)
 #define LOG_INF(...) ((void)0)
 #define ZMK_EV_EVENT_BUBBLE 0
+#define ZMK_BLE_ADV_STOP 0
+static void zmk_ble_advertising_observed(unsigned char stage, int err) {
+    assert(stage == ZMK_BLE_ADV_STOP); (void)err;
+}
 typedef int zmk_event_t;
 enum { ZMK_ADV_NONE, ZMK_ADV_CONN, ZMK_ADV_DIR };
 static uint8_t active_profile = 2;
+struct adv_target { uint8_t profile; };
+static struct adv_target adv_target_snapshot(void) {
+    return (struct adv_target){.profile = active_profile};
+}
 static bool adv_throttled;
-static int advertising_status, stops, updates;
+static int advertising_status, stops, updates, stop_error;
+static int update_advertising_work, queued;
+static void k_work_submit(int *work) {
+    assert(work == &update_advertising_work); queued = 1;
+}
 #if FEATURES
 static bool idle_go_dark;
 static int evict_adv_cooldown_work, cancelled, directed, boosts;
@@ -38,8 +50,7 @@ static void k_work_cancel_delayable(int *work) {
 static void totem_dir_phase_arm(void) { directed++; }
 static void totem_adv_boost_arm(void) { boosts++; }
 #endif
-static int bt_le_adv_stop(void) { stops++; return 0; }
-static int update_advertising(void) { updates++; return 0; }
+static int bt_le_adv_stop(void) { stops++; return stop_error; }
 static int conn_callbacks, zmk_ble_auth_cb_display, zmk_ble_auth_info_cb_display;
 static void bt_conn_cb_register(int *cb) { assert(cb == &conn_callbacks); }
 static void bt_conn_auth_cb_register(int *cb) { assert(cb == &zmk_ble_auth_cb_display); }
@@ -47,6 +58,10 @@ static void bt_conn_auth_info_cb_register(int *cb) { assert(cb == &zmk_ble_auth_
 static void zmk_ble_ready(int err) { assert(err == 0); }
 /* ACTUAL_LISTENER */
 /* ACTUAL_STARTUP */
+static void run_worker(void) {
+    assert(queued); queued = 0;
+    if (apply_advertising_profile(false) == 0) { updates++; }
+}
 int main(void) {
     assert(zmk_ble_complete_startup() == 0);
     assert(adv_profile_index == 2);
@@ -60,22 +75,41 @@ int main(void) {
         assert(adv_throttle_profile_changed_listener(NULL) == 0);
     }
     assert(adv_throttled && stops == 0 && updates == 0);
+    run_worker();
+    assert(adv_throttled && stops == 0 && updates == 1);
 #if FEATURES
     assert(idle_go_dark && cancelled == 0 && directed == 0 && boosts == 0);
 #endif
-    /* A real switch, even before any host connected, still acts immediately. */
+    /* Callers never issue HCI; the queued worker applies the latest profile. */
     active_profile = 0;
     assert(adv_throttle_profile_changed_listener(NULL) == 0);
-    assert(!adv_throttled && adv_profile_index == 0 && stops == 1 && updates == 1);
+    assert(adv_throttled && stops == 0 && updates == 1);
+    run_worker();
+    assert(!adv_throttled && adv_profile_index == 0 && stops == 1 && updates == 2);
 #if FEATURES
     assert(!idle_go_dark && cancelled == 1 && directed == 1 && boosts == 1);
 #endif
     adv_throttle_profile_changed_listener(NULL);
-    assert(stops == 1 && updates == 1);
+    run_worker();
+    assert(stops == 1 && updates == 3);
     active_profile = 2;
     advertising_status = ZMK_ADV_DIR;
     adv_throttle_profile_changed_listener(NULL);
-    assert(stops == 2 && updates == 2);
+    run_worker();
+    assert(stops == 2 && updates == 4);
+    active_profile = 0; advertising_status = ZMK_ADV_CONN; stop_error = -1;
+    adv_throttle_profile_changed_listener(NULL);
+    run_worker();
+    assert(stops == 3 && updates == 4 && advertising_status == ZMK_ADV_CONN);
+    assert(adv_profile_index == 2); /* Failed stop must not commit the new filter profile. */
+    stop_error = 0; adv_throttle_profile_changed_listener(NULL);
+    run_worker();
+    assert(stops == 4 && updates == 5 && adv_profile_index == 0);
+    /* A burst returning to the current profile needs no stale intermediate restart. */
+    active_profile = 2; adv_throttle_profile_changed_listener(NULL);
+    active_profile = 0; adv_throttle_profile_changed_listener(NULL);
+    run_worker();
+    assert(stops == 4 && adv_profile_index == 0 && updates == 6);
     return 0;
 }
 """

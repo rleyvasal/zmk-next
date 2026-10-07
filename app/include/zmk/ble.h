@@ -48,6 +48,20 @@ void zmk_ble_totem_adv_boost_rearm(void);
 void zmk_ble_totem_kick_open_adv(void);
 void zmk_ble_totem_wake_ads(void);
 
+enum zmk_ble_adv_stage {
+    ZMK_BLE_ADV_STOP,
+    ZMK_BLE_ADV_PEER,
+    ZMK_BLE_ADV_CLEAR,
+    ZMK_BLE_ADV_ADD,
+    ZMK_BLE_ADV_START_OPEN,
+    ZMK_BLE_ADV_START_FILTERED,
+    ZMK_BLE_ADV_START_DIRECTED_RPA,
+    ZMK_BLE_ADV_START_DIRECTED,
+    ZMK_BLE_ADV_HANDOFF_DISCONNECT,
+};
+/* Optional diagnostics hook; err is the unchanged Zephyr API result. */
+void zmk_ble_advertising_observed(uint8_t stage, int err);
+
 int zmk_ble_unpair_all(void);
 
 int zmk_ble_set_device_name(char *name);

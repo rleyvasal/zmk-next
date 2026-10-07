@@ -93,6 +93,70 @@ static const bool totem_adv_boost_active = false;
 static struct zmk_ble_profile profiles[ZMK_BLE_PROFILE_COUNT];
 static uint8_t active_profile;
 
+#define ZMK_BLE_PROFILE_HANDOFF                                                                    \
+    ((IS_ENABLED(CONFIG_TOTEM_EXCLUSIVE_HOST) || IS_ENABLED(CONFIG_ZMK_EXCLUSIVE_HOST)) &&         \
+     IS_ENABLED(CONFIG_TOTEM_ADV_THROTTLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL))
+
+/* Profile writers only hold this lock for the RAM update, never for HCI. */
+static struct k_spinlock adv_target_lock;
+static uint32_t adv_target_version;
+static uint32_t advertising_target_version;
+static bool profile_handoff_pending;
+struct adv_target {
+    uint32_t version;
+    uint8_t profile;
+    bt_addr_le_t peer;
+    bool handoff;
+};
+
+static struct adv_target adv_target_snapshot(void) {
+    k_spinlock_key_t key = k_spin_lock(&adv_target_lock);
+    struct adv_target target = {
+        .version = adv_target_version,
+        .profile = active_profile,
+        .peer = profiles[active_profile].peer,
+        .handoff = profile_handoff_pending,
+    };
+    k_spin_unlock(&adv_target_lock, key);
+    return target;
+}
+
+static bool adv_target_is_current(const struct adv_target *target) {
+    k_spinlock_key_t key = k_spin_lock(&adv_target_lock);
+    bool current = target->version == adv_target_version;
+    k_spin_unlock(&adv_target_lock, key);
+#if IS_ENABLED(CONFIG_ZMK_USB) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    current = current && !zmk_usb_is_powered();
+#endif
+    return current;
+}
+
+enum adv_request {
+    ADV_LINK_COMPLETE,
+    ADV_RESTART,
+    ADV_WAKE,
+    ADV_REARM,
+    ADV_KICK,
+    ADV_KEYPRESS,
+    ADV_RESELECT,
+};
+static atomic_t adv_requests;
+#if IS_ENABLED(CONFIG_TOTEM_RESELECT_RECONNECT) && IS_ENABLED(CONFIG_TOTEM_ADV_THROTTLE) &&        \
+    IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+static atomic_t adv_reselect_profile;
+#endif
+static void update_advertising_callback(struct k_work *work);
+static K_WORK_DEFINE(update_advertising_work, update_advertising_callback);
+
+static bool advertising_worker(void) {
+    return k_current_get() == k_work_queue_thread_get(&k_sys_work_q);
+}
+
+static void request_advertising(enum adv_request request) {
+    atomic_set_bit(&adv_requests, request);
+    k_work_submit(&update_advertising_work);
+}
+
 #define DEVICE_NAME CONFIG_BT_DEVICE_NAME
 #define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
 
@@ -140,7 +204,10 @@ void set_profile_address(uint8_t index, const bt_addr_le_t *addr) {
 
     bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
 
+    k_spinlock_key_t key = k_spin_lock(&adv_target_lock);
     memcpy(&profiles[index].peer, addr, sizeof(bt_addr_le_t));
+    adv_target_version++;
+    k_spin_unlock(&adv_target_lock, key);
     sprintf(setting_name, "ble/profiles/%d", index);
     LOG_DBG("Setting profile addr for %s to %s", setting_name, addr_str);
 #if IS_ENABLED(CONFIG_SETTINGS)
@@ -151,6 +218,11 @@ void set_profile_address(uint8_t index, const bt_addr_le_t *addr) {
 
 bool zmk_ble_active_profile_is_connected(void) {
     return zmk_ble_profile_is_connected(active_profile);
+}
+
+__weak void zmk_ble_advertising_observed(uint8_t stage, int err) {
+    ARG_UNUSED(stage);
+    ARG_UNUSED(err);
 }
 
 static void profile_connected_foreach(struct bt_conn *conn, void *data) {
@@ -207,13 +279,40 @@ bool zmk_ble_profile_is_connected(uint8_t index) {
     return ctx.found;
 }
 
+/* All callers run on the system work queue. A profile/USB change while HCI
+ * sleeps invalidates the transaction; never keep advertising its old target. */
+static int start_advertising(const struct adv_target *target, const struct bt_le_adv_param *param,
+                             enum advertising_type type, uint8_t stage) {
+    if (!adv_target_is_current(target) || (ZMK_BLE_PROFILE_HANDOFF && target->handoff)) {
+        k_work_submit(&update_advertising_work);
+        return -EAGAIN;
+    }
+    int err = bt_le_adv_start(param, zmk_ble_ad, ARRAY_SIZE(zmk_ble_ad), NULL, 0);
+    zmk_ble_advertising_observed(stage, err);
+    if (!err) {
+        advertising_status = type;
+        advertising_target_version = target->version;
+        if (!adv_target_is_current(target)) {
+            err = bt_le_adv_stop();
+            zmk_ble_advertising_observed(ZMK_BLE_ADV_STOP, err);
+            if (!err) {
+                advertising_status = ZMK_ADV_NONE;
+            }
+            k_work_submit(&update_advertising_work);
+            return err ? err : -EAGAIN;
+        }
+    }
+    return err;
+}
+
 #define CHECKED_ADV_STOP()                                                                         \
     err = bt_le_adv_stop();                                                                        \
-    advertising_status = ZMK_ADV_NONE;                                                             \
+    zmk_ble_advertising_observed(ZMK_BLE_ADV_STOP, err);                                           \
     if (err) {                                                                                     \
         LOG_ERR("Failed to stop advertising (err %d)", err);                                       \
         return err;                                                                                \
-    }
+    }                                                                                              \
+    advertising_status = ZMK_ADV_NONE;
 
 /* Directed advertising to the active bonded peer. Used after profile switch to
  * invite that host faster than undirected discovery (helps Windows especially).
@@ -221,7 +320,7 @@ bool zmk_ble_profile_is_connected(uint8_t index) {
  * RPA. Failures fall through to open undirected (caller handles). */
 #define CHECKED_DIR_ADV()                                                                          \
     do {                                                                                           \
-        addr = zmk_ble_active_profile_addr();                                                      \
+        addr = &target.peer;                                                                       \
         if (addr == NULL || !bt_addr_le_cmp(addr, BT_ADDR_LE_ANY)) {                               \
             err = -EINVAL;                                                                         \
             break;                                                                                 \
@@ -237,11 +336,11 @@ bool zmk_ble_profile_is_connected(uint8_t index) {
          * a privacy central — request RPA TargetA when the stack supports it. */                \
         struct bt_le_adv_param dir_param = *BT_LE_ADV_CONN_DIR_LOW_DUTY(addr);                     \
         dir_param.options |= BT_LE_ADV_OPT_DIR_ADDR_RPA;                                           \
-        err = bt_le_adv_start(&dir_param, zmk_ble_ad, ARRAY_SIZE(zmk_ble_ad), NULL, 0);            \
-        if (err) {                                                                                 \
+        err = start_advertising(&target, &dir_param, ZMK_ADV_DIR, ZMK_BLE_ADV_START_DIRECTED_RPA); \
+        if (err && err != -EAGAIN) {                                                               \
             /* Retry without RPA option (some peers / stacks reject it). */                        \
             dir_param = *BT_LE_ADV_CONN_DIR_LOW_DUTY(addr);                                        \
-            err = bt_le_adv_start(&dir_param, zmk_ble_ad, ARRAY_SIZE(zmk_ble_ad), NULL, 0);        \
+            err = start_advertising(&target, &dir_param, ZMK_ADV_DIR, ZMK_BLE_ADV_START_DIRECTED); \
         }                                                                                          \
         if (err) {                                                                                 \
             char addr_str[BT_ADDR_LE_STR_LEN];                                                     \
@@ -258,6 +357,12 @@ bool zmk_ble_profile_is_connected(uint8_t index) {
     } while (0)
 
 int update_advertising(void);
+
+#if IS_ENABLED(CONFIG_TOTEM_ADV_THROTTLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+static int apply_advertising_profile(bool handoff);
+static void advertising_keypress(void);
+static void advertising_reselect(void);
+#endif
 
 #if IS_ENABLED(CONFIG_TOTEM_ADV_THROTTLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 static bool adv_throttled = false;
@@ -315,6 +420,7 @@ static void totem_dir_end_work_handler(struct k_work *work) {
     LOG_INF("Directed phase ended; open undirected advertising (boost)");
     if (advertising_status == ZMK_ADV_DIR || advertising_status == ZMK_ADV_CONN) {
         int e = bt_le_adv_stop();
+        zmk_ble_advertising_observed(ZMK_BLE_ADV_STOP, e);
         if (e && e != -EALREADY) {
             LOG_WRN("Stop directed adv failed (err %d)", e);
         }
@@ -357,48 +463,163 @@ static void open_adv_retry_arm(void) {
 }
 #endif
 
-static void totem_fal_clear_quiet(void) {
-#if IS_ENABLED(CONFIG_BT_FILTER_ACCEPT_LIST)
-    (void)bt_le_filter_accept_list_clear();
-#endif
+#if (IS_ENABLED(CONFIG_TOTEM_ACTIVE_ADV_FILTER) && IS_ENABLED(CONFIG_BT_FILTER_ACCEPT_LIST) &&     \
+     IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)) ||                                                 \
+    ZMK_BLE_PROFILE_HANDOFF
+struct totem_bond_match {
+    bt_addr_le_t peer;
+    bool found;
+};
+
+static void totem_match_bond(const struct bt_bond_info *info, void *data) {
+    struct totem_bond_match *match = data;
+    if (!bt_addr_le_cmp(&info->addr, &match->peer)) {
+        match->found = true;
+    }
 }
+#endif
+
+#if ZMK_BLE_PROFILE_HANDOFF
+struct handoff_context {
+    struct adv_target target;
+    bool waiting;
+    int err;
+};
+
+static void handoff_disconnect_host(struct bt_conn *conn, void *data) {
+    struct handoff_context *ctx = data;
+    struct bt_conn_info info;
+    if (!adv_target_is_current(&ctx->target)) {
+        ctx->err = -EAGAIN;
+        return;
+    }
+    int err = bt_conn_get_info(conn, &info);
+    if (err) {
+        ctx->err = err;
+        return;
+    }
+    if (info.role != BT_CONN_ROLE_PERIPHERAL || info.state == BT_CONN_STATE_DISCONNECTED) {
+        return;
+    }
+    int index = zmk_ble_profile_index(bt_conn_get_dst(conn));
+    if (index == ctx->target.profile && info.state == BT_CONN_STATE_CONNECTED) {
+        return;
+    }
+    /* Unknown/RPA peers must resolve before we decide whether to disconnect them. */
+    ctx->waiting = true;
+    if (index < 0 || info.state != BT_CONN_STATE_CONNECTED) {
+        return;
+    }
+    err = bt_conn_disconnect(conn, CONFIG_TOTEM_EXCLUSIVE_DISCONNECT_REASON);
+    zmk_ble_advertising_observed(ZMK_BLE_ADV_HANDOFF_DISCONNECT, err);
+    if (err) {
+        LOG_WRN("Profile handoff disconnect %d failed (err %d)", index, err);
+        ctx->err = err;
+    } else {
+        LOG_INF("Profile handoff disconnect %d before advertising %d", index, ctx->target.profile);
+    }
+}
+
+static int apply_profile_handoff(const struct adv_target *target) {
+    if (!target->handoff) {
+        return 0;
+    }
+#if IS_ENABLED(CONFIG_ZMK_USB)
+    if (zmk_usb_is_powered()) {
+        return 0;
+    }
+#endif
+    if (!adv_target_is_current(target)) {
+        k_work_submit(&update_advertising_work);
+        return -EAGAIN;
+    }
+    int err;
+    if (advertising_status != ZMK_ADV_NONE) {
+        CHECKED_ADV_STOP();
+    }
+    if (bt_addr_le_cmp(&target->peer, BT_ADDR_LE_ANY)) {
+        struct totem_bond_match match = {.peer = target->peer};
+        bt_foreach_bond(BT_ID_DEFAULT, totem_match_bond, &match);
+        zmk_ble_advertising_observed(ZMK_BLE_ADV_PEER, match.found ? 0 : -ENOENT);
+        if (!match.found) {
+            LOG_WRN("Profile handoff target %d has no bond", target->profile);
+            return -ENOENT;
+        }
+        struct handoff_context ctx = {.target = *target};
+        bt_conn_foreach(BT_CONN_TYPE_LE, handoff_disconnect_host, &ctx);
+        if (ctx.err) {
+            return ctx.err;
+        }
+        if (ctx.waiting) {
+            /* disconnected()/identity_resolved() queue the continuation, never block RX. */
+            return -EINPROGRESS;
+        }
+    }
+    k_spinlock_key_t key = k_spin_lock(&adv_target_lock);
+    bool current = target->version == adv_target_version;
+    if (current) {
+        profile_handoff_pending = false;
+    }
+    k_spin_unlock(&adv_target_lock, key);
+    if (!current) {
+        k_work_submit(&update_advertising_work);
+        return -EAGAIN;
+    }
+    return 0;
+}
+#endif
 
 /* When the active profile is bonded, only that host may complete a connection
  * (Filter Accept List + BT_LE_ADV_OPT_FILTER_CONN). Open/empty profiles use
  * unfiltered ads for pairing. Background bonded hosts cannot thrash the link
  * while another profile is selected — primary multi-host isolation fix.
  *
- * Returns true only when FAL is armed and filtered advertising should be used.
- * Fail-open: any setup error → false (caller uses unfiltered open ads). */
-static bool totem_prepare_active_fal(void) {
+ * Returns an error on setup failure; unrestricted ads are only for pairing
+ * into an empty profile or when the isolation feature is disabled. */
+static int totem_prepare_active_fal(const struct adv_target *target, bool *use_fal) {
+    *use_fal = false;
 #if IS_ENABLED(CONFIG_TOTEM_ACTIVE_ADV_FILTER) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) &&     \
     IS_ENABLED(CONFIG_BT_FILTER_ACCEPT_LIST)
-    if (zmk_ble_active_profile_is_open()) {
+    int err = bt_le_adv_stop();
+    zmk_ble_advertising_observed(ZMK_BLE_ADV_STOP, err);
+    if (err) {
+        LOG_WRN("FAL advertising stop failed (err %d); will retry", err);
+        return err;
+    }
+    advertising_status = ZMK_ADV_NONE;
+    if (!bt_addr_le_cmp(&target->peer, BT_ADDR_LE_ANY)) {
         LOG_DBG("FAL skip: active profile open (pairing)");
-        totem_fal_clear_quiet();
-        return false;
+        return 0;
     }
-    bt_addr_le_t *peer = zmk_ble_active_profile_addr();
-    if (peer == NULL || !bt_addr_le_cmp(peer, BT_ADDR_LE_ANY)) {
-        LOG_DBG("FAL skip: no bonded peer on active profile");
-        totem_fal_clear_quiet();
-        return false;
+    const bt_addr_le_t *peer = &target->peer;
+    struct totem_bond_match match = {.peer = *peer};
+    if ((match.peer.type != BT_ADDR_LE_PUBLIC && match.peer.type != BT_ADDR_LE_RANDOM) ||
+        !bt_addr_le_is_identity(&match.peer)) {
+        LOG_WRN("FAL setup failed: profile peer is not an identity address");
+        zmk_ble_advertising_observed(ZMK_BLE_ADV_PEER, -EINVAL);
+        return -EINVAL;
+    }
+    bt_foreach_bond(BT_ID_DEFAULT, totem_match_bond, &match);
+    zmk_ble_advertising_observed(ZMK_BLE_ADV_PEER, match.found ? 0 : -ENOENT);
+    if (!match.found) {
+        LOG_WRN("FAL setup failed: profile identity has no bond");
+        return -ENOENT;
     }
 
-    int err = bt_le_filter_accept_list_clear();
-    if (err && err != -EALREADY) {
-        LOG_WRN("FAL clear failed (err %d); advertising unfiltered", err);
-        return false;
+    err = bt_le_filter_accept_list_clear();
+    zmk_ble_advertising_observed(ZMK_BLE_ADV_CLEAR, err);
+    if (err) {
+        LOG_WRN("FAL clear failed (err %d); will retry", err);
+        return err;
     }
 
-    err = bt_le_filter_accept_list_add(peer);
-    /* Already present is OK (some stacks return -EEXIST / -EALREADY). */
-    if (err && err != -EEXIST && err != -EALREADY) {
+    err = bt_le_filter_accept_list_add(&match.peer);
+    zmk_ble_advertising_observed(ZMK_BLE_ADV_ADD, err);
+    if (err) {
         char addr[BT_ADDR_LE_STR_LEN];
         bt_addr_le_to_str(peer, addr, sizeof(addr));
-        LOG_WRN("FAL add %s failed (err %d); advertising unfiltered", addr, err);
-        totem_fal_clear_quiet();
-        return false;
+        LOG_WRN("FAL add %s failed (err %d); will retry", addr, err);
+        return err;
     }
 
     {
@@ -406,44 +627,42 @@ static bool totem_prepare_active_fal(void) {
         bt_addr_le_to_str(peer, addr, sizeof(addr));
         LOG_INF("FAL active host only: %s (profile %d)", addr, active_profile);
     }
-    return true;
+    *use_fal = true;
 #else
-    return false;
+    ARG_UNUSED(target);
 #endif
+    return 0;
 }
 
 #define CHECKED_OPEN_ADV()                                                                         \
     do {                                                                                           \
-        bool use_fal = totem_prepare_active_fal();                                                 \
-        bool fal_attempted = use_fal;                                                              \
+        bool use_fal;                                                                              \
+        err = totem_prepare_active_fal(&target, &use_fal);                                         \
+        if (err) {                                                                                 \
+            LOG_WRN("Advertising setup failed (err %d); will retry", err);                         \
+            break;                                                                                 \
+        }                                                                                          \
         /* Pass compound literals directly into bt_le_adv_start (lifetime = full call). */         \
         if (use_fal) {                                                                             \
-            err = bt_le_adv_start(totem_adv_boost_active ? ZMK_ADV_CONN_NAME_BOOST_FILTER          \
-                                                         : ZMK_ADV_CONN_NAME_FILTER,               \
-                                  zmk_ble_ad, ARRAY_SIZE(zmk_ble_ad), NULL, 0);                    \
-            if (err && err != -EALREADY) {                                                         \
-                LOG_WRN("Filtered advertising failed (err %d); falling back to open", err);        \
-                use_fal = false;                                                                   \
-                totem_fal_clear_quiet();                                                           \
-            } else {                                                                               \
+            err = start_advertising(&target,                                                       \
+                                    totem_adv_boost_active ? ZMK_ADV_CONN_NAME_BOOST_FILTER        \
+                                                           : ZMK_ADV_CONN_NAME_FILTER,             \
+                                    ZMK_ADV_CONN, ZMK_BLE_ADV_START_FILTERED);                     \
+            if (!err) {                                                                            \
                 LOG_DBG("Advertising started (FAL filtered, boost=%d)",                            \
                         (int)totem_adv_boost_active);                                              \
             }                                                                                      \
         }                                                                                          \
         if (!use_fal) {                                                                            \
-            err = bt_le_adv_start(totem_adv_boost_active ? ZMK_ADV_CONN_NAME_BOOST                 \
-                                                         : ZMK_ADV_CONN_NAME,                      \
-                                  zmk_ble_ad, ARRAY_SIZE(zmk_ble_ad), NULL, 0);                    \
-            if (fal_attempted && (err == 0 || err == -EALREADY)) {                                 \
-                LOG_WRN("Advertising open (unfiltered fallback after FAL)");                       \
-            }                                                                                      \
+            err = start_advertising(                                                               \
+                &target, totem_adv_boost_active ? ZMK_ADV_CONN_NAME_BOOST : ZMK_ADV_CONN_NAME,     \
+                ZMK_ADV_CONN, ZMK_BLE_ADV_START_OPEN);                                             \
         }                                                                                          \
-        if (err == -EALREADY) {                                                                    \
+        if (err == -EALREADY && !IS_ENABLED(CONFIG_TOTEM_ACTIVE_ADV_FILTER)) {                     \
             advertising_status = ZMK_ADV_CONN;                                                     \
             err = 0;                                                                               \
         } else if (err) {                                                                          \
             LOG_WRN("Advertising start failed (err %d); will retry", err);                         \
-            advertising_status = ZMK_ADV_NONE;                                                     \
             err = 0;                                                                               \
         } else {                                                                                   \
             advertising_status = ZMK_ADV_CONN;                                                     \
@@ -477,6 +696,7 @@ static void adv_boost_end_work_handler(struct k_work *work) {
     LOG_INF("Post-switch boost ended; active host not up — advertising dark until keypress");
     if (advertising_status == ZMK_ADV_CONN || advertising_status == ZMK_ADV_DIR) {
         int err = bt_le_adv_stop();
+        zmk_ble_advertising_observed(ZMK_BLE_ADV_STOP, err);
         if (err && err != -EALREADY) {
             LOG_WRN("Failed to stop advertising for post-switch dark (err %d)", err);
         }
@@ -490,6 +710,7 @@ static void adv_boost_end_work_handler(struct k_work *work) {
     if (advertising_status == ZMK_ADV_CONN) {
         LOG_INF("Advertising boost ended; returning to normal interval");
         int err = bt_le_adv_stop();
+        zmk_ble_advertising_observed(ZMK_BLE_ADV_STOP, err);
         if (err) {
             LOG_ERR("Failed to stop advertising after boost (err %d)", err);
             return;
@@ -526,6 +747,10 @@ const char *zmk_ble_totem_adv_state(void) {
 }
 
 void zmk_ble_totem_wake_ads(void) {
+    if (!advertising_worker()) {
+        request_advertising(ADV_WAKE);
+        return;
+    }
     adv_throttled = false;
     LOG_INF("Wake advertising");
 #if IS_ENABLED(CONFIG_TOTEM_ADV_BOOST)
@@ -544,8 +769,10 @@ static void totem_restart_open_adv_if_running(void) {
     }
     if (advertising_status == ZMK_ADV_CONN || advertising_status == ZMK_ADV_DIR) {
         int err = bt_le_adv_stop();
-        if (err && err != -EALREADY) {
+        zmk_ble_advertising_observed(ZMK_BLE_ADV_STOP, err);
+        if (err) {
             LOG_WRN("totem boost/kick: adv_stop err %d", err);
+            return;
         }
         advertising_status = ZMK_ADV_NONE;
         /* Brief ms-class gap only — NOT multi-second EVICT_ADV_COOLDOWN */
@@ -554,6 +781,10 @@ static void totem_restart_open_adv_if_running(void) {
 }
 
 void zmk_ble_totem_adv_boost_rearm(void) {
+    if (!advertising_worker()) {
+        request_advertising(ADV_REARM);
+        return;
+    }
 #if IS_ENABLED(CONFIG_TOTEM_ADV_BOOST)
     if (adv_throttled) {
         return;
@@ -570,6 +801,10 @@ void zmk_ble_totem_adv_boost_rearm(void) {
 }
 
 void zmk_ble_totem_kick_open_adv(void) {
+    if (!advertising_worker()) {
+        request_advertising(ADV_KICK);
+        return;
+    }
     if (zmk_ble_totem_ads_suppressed()) {
         return;
     }
@@ -597,6 +832,7 @@ static void adv_throttle_work_handler(struct k_work *work) {
 #endif
         LOG_INF("Advertising idle timeout; pausing advertising until a key is pressed");
         int err = bt_le_adv_stop();
+        zmk_ble_advertising_observed(ZMK_BLE_ADV_STOP, err);
         if (err) {
             LOG_ERR("Failed to pause advertising (err %d)", err);
             return;
@@ -675,7 +911,49 @@ static K_WORK_DEFINE(idle_disconnect_sync_work, idle_disconnect_sync_work_handle
 #endif
 
 int update_advertising(void) {
+    if (!advertising_worker()) {
+        k_work_submit(&update_advertising_work);
+        return 0;
+    }
     int err = 0;
+#if IS_ENABLED(CONFIG_TOTEM_ADV_THROTTLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    bool handoff = false;
+#endif
+    if (atomic_test_and_clear_bit(&adv_requests, ADV_LINK_COMPLETE)) {
+        advertising_status = ZMK_ADV_NONE;
+    }
+    if (atomic_test_bit(&adv_requests, ADV_RESTART)) {
+        CHECKED_ADV_STOP();
+        atomic_clear_bit(&adv_requests, ADV_RESTART);
+    }
+#if ZMK_BLE_PROFILE_HANDOFF
+    struct adv_target handoff_target = adv_target_snapshot();
+    err = apply_profile_handoff(&handoff_target);
+    if (err == -EINPROGRESS) {
+        return 0;
+    }
+    if (err) {
+        open_adv_retry_arm();
+        return err;
+    }
+    handoff = handoff_target.handoff && !adv_target_snapshot().handoff;
+#endif
+#if IS_ENABLED(CONFIG_TOTEM_ADV_THROTTLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    err = apply_advertising_profile(handoff);
+    if (err) {
+        open_adv_retry_arm();
+        return err;
+    }
+#if IS_ENABLED(CONFIG_TOTEM_DIR_THEN_OPEN)
+    if (zmk_ble_active_profile_is_connected()) {
+        totem_dir_phase_clear();
+    }
+#endif
+#endif
+    struct adv_target target = adv_target_snapshot();
+    if (advertising_status != ZMK_ADV_NONE && advertising_target_version != target.version) {
+        CHECKED_ADV_STOP();
+    }
     bt_addr_le_t *addr;
     struct bt_conn *conn;
     enum advertising_type desired_adv = ZMK_ADV_NONE;
@@ -741,7 +1019,7 @@ int update_advertising(void) {
     case ZMK_ADV_DIR + CURR_ADV(ZMK_ADV_CONN):
         CHECKED_ADV_STOP();
         CHECKED_DIR_ADV();
-        if (err) {
+        if (err && err != -EAGAIN && advertising_status == ZMK_ADV_NONE) {
             /* Directed failed — fall back to open undirected immediately. */
 #if IS_ENABLED(CONFIG_TOTEM_DIR_THEN_OPEN) && IS_ENABLED(CONFIG_TOTEM_ADV_THROTTLE) &&             \
     IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
@@ -752,7 +1030,7 @@ int update_advertising(void) {
         break;
     case ZMK_ADV_DIR + CURR_ADV(ZMK_ADV_NONE):
         CHECKED_DIR_ADV();
-        if (err) {
+        if (err && err != -EAGAIN && advertising_status == ZMK_ADV_NONE) {
 #if IS_ENABLED(CONFIG_TOTEM_DIR_THEN_OPEN) && IS_ENABLED(CONFIG_TOTEM_ADV_THROTTLE) &&             \
     IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
             totem_dir_phase_clear();
@@ -792,13 +1070,45 @@ int update_advertising(void) {
     return 0;
 };
 
-static void update_advertising_callback(struct k_work *work) { update_advertising(); }
-
-K_WORK_DEFINE(update_advertising_work, update_advertising_callback);
+static void update_advertising_callback(struct k_work *work) {
+    ARG_UNUSED(work);
+#if IS_ENABLED(CONFIG_TOTEM_ADV_THROTTLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    if (atomic_test_and_clear_bit(&adv_requests, ADV_KEYPRESS)) {
+        advertising_keypress();
+    }
+    if (atomic_test_and_clear_bit(&adv_requests, ADV_RESELECT)) {
+        advertising_reselect();
+    }
+    if (atomic_test_and_clear_bit(&adv_requests, ADV_WAKE)) {
+        zmk_ble_totem_wake_ads();
+    }
+    if (atomic_test_and_clear_bit(&adv_requests, ADV_REARM)) {
+        zmk_ble_totem_adv_boost_rearm();
+    }
+    if (atomic_test_and_clear_bit(&adv_requests, ADV_KICK)) {
+        zmk_ble_totem_kick_open_adv();
+    }
+#endif
+#if IS_ENABLED(CONFIG_ZMK_USB) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) &&                     \
+    IS_ENABLED(CONFIG_TOTEM_ADV_THROTTLE)
+    static bool usb_was_powered;
+    bool usb_powered = zmk_usb_is_powered();
+    bool usb_disconnected = usb_was_powered && !usb_powered;
+    usb_was_powered = usb_powered;
+    if (usb_disconnected) {
+        zmk_ble_totem_wake_ads();
+        return;
+    }
+#endif
+    update_advertising();
+}
 
 #if IS_ENABLED(CONFIG_ZMK_USB) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 static int totem_usb_host_adv_listener(const zmk_event_t *eh) {
     ARG_UNUSED(eh);
+    k_spinlock_key_t key = k_spin_lock(&adv_target_lock);
+    adv_target_version++;
+    k_spin_unlock(&adv_target_lock, key);
     k_work_submit(&update_advertising_work);
     return ZMK_EV_EVENT_BUBBLE;
 }
@@ -807,26 +1117,11 @@ ZMK_LISTENER(totem_usb_host_adv, totem_usb_host_adv_listener);
 ZMK_SUBSCRIPTION(totem_usb_host_adv, zmk_usb_conn_state_changed);
 #endif
 
-static void update_advertising_delayed(struct k_work *work) {
-    ARG_UNUSED(work);
-    update_advertising();
-}
-
-static K_WORK_DELAYABLE_DEFINE(update_advertising_dwork, update_advertising_delayed);
-
 #if IS_ENABLED(CONFIG_TOTEM_ADV_THROTTLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 /* A key press on either half (the central sees right-half presses over the split
  * link) resumes advertising after the idle throttle paused it. First press or two
  * may be lost while the host reconnects. */
-static int adv_throttle_keypress_listener(const zmk_event_t *eh) {
-    const struct zmk_position_state_changed *ev = as_zmk_position_state_changed(eh);
-    /* Only a real key PRESS counts as user presence. Ignore releases -- in particular
-     * the pressed=false events a split-link reconnect raises for positions it had
-     * tracked (release_peripheral_slot in split/bluetooth/central.c) -- so they can't
-     * wake a throttled/dark host. */
-    if (ev == NULL || !ev->state) {
-        return ZMK_EV_EVENT_BUBBLE;
-    }
+static void advertising_keypress(void) {
 #if IS_ENABLED(CONFIG_TOTEM_IDLE_DISCONNECT)
     /* Key press = user activity: restart the idle countdown. (Connect also arms
      * the timer; this path resets it while typing.) */
@@ -835,7 +1130,7 @@ static int adv_throttle_keypress_listener(const zmk_event_t *eh) {
     if (adv_throttled) {
 #if IS_ENABLED(CONFIG_ZMK_USB)
         if (zmk_usb_is_powered()) {
-            return ZMK_EV_EVENT_BUBBLE;
+            return;
         }
 #endif
         adv_throttled = false;
@@ -847,6 +1142,14 @@ static int adv_throttle_keypress_listener(const zmk_event_t *eh) {
         totem_adv_boost_arm();
 #endif
         update_advertising();
+    }
+}
+
+static int adv_throttle_keypress_listener(const zmk_event_t *eh) {
+    const struct zmk_position_state_changed *ev = as_zmk_position_state_changed(eh);
+    /* Ignore synthetic releases from split reconnects. */
+    if (ev != NULL && ev->state && (adv_throttled || IS_ENABLED(CONFIG_TOTEM_IDLE_DISCONNECT))) {
+        request_advertising(ADV_KEYPRESS);
     }
     return ZMK_EV_EVENT_BUBBLE;
 }
@@ -860,13 +1163,12 @@ ZMK_SUBSCRIPTION(totem_adv_throttle, zmk_position_state_changed);
  * before the target host can see the keyboard. */
 static uint8_t adv_profile_index;
 
-static int adv_throttle_profile_changed_listener(const zmk_event_t *eh) {
-    ARG_UNUSED(eh);
-    /* This event also reports link changes for the same selected profile. */
-    if (adv_profile_index == active_profile) {
-        return ZMK_EV_EVENT_BUBBLE;
+static int apply_advertising_profile(bool handoff) {
+    struct adv_target target = adv_target_snapshot();
+    /* Link changes for the same selected profile must not wake/boost it. */
+    if (adv_profile_index == target.profile && !handoff) {
+        return 0;
     }
-    adv_profile_index = active_profile;
 #if IS_ENABLED(CONFIG_TOTEM_IDLE_DISCONNECT)
     idle_go_dark = false;
 #endif
@@ -887,11 +1189,14 @@ static int adv_throttle_profile_changed_listener(const zmk_event_t *eh) {
      * exclusive-host drops the previous peer. */
     if (advertising_status == ZMK_ADV_CONN || advertising_status == ZMK_ADV_DIR) {
         int err = bt_le_adv_stop();
+        zmk_ble_advertising_observed(ZMK_BLE_ADV_STOP, err);
         if (err) {
             LOG_WRN("Failed to stop advertising on profile change (err %d)", err);
+            return err;
         }
         advertising_status = ZMK_ADV_NONE;
     }
+    adv_profile_index = target.profile;
     LOG_INF("Profile changed; advertising for active profile%s",
 #if IS_ENABLED(CONFIG_TOTEM_DIR_THEN_OPEN)
             " (dir-then-open)"
@@ -904,7 +1209,12 @@ static int adv_throttle_profile_changed_listener(const zmk_event_t *eh) {
             ""
 #endif
     );
-    update_advertising();
+    return 0;
+}
+
+static int adv_throttle_profile_changed_listener(const zmk_event_t *eh) {
+    ARG_UNUSED(eh);
+    k_work_submit(&update_advertising_work);
     return ZMK_EV_EVENT_BUBBLE;
 }
 
@@ -993,6 +1303,32 @@ static int ble_save_profile(void) {
 #endif
 }
 
+#if IS_ENABLED(CONFIG_TOTEM_ADV_THROTTLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+static void advertising_reselect(void) {
+#if IS_ENABLED(CONFIG_TOTEM_RESELECT_RECONNECT)
+    uint8_t index = atomic_get(&adv_reselect_profile);
+    if (index != active_profile) {
+        return;
+    }
+#if IS_ENABLED(CONFIG_ZMK_USB)
+    if (zmk_usb_is_powered()) {
+        return;
+    }
+#endif
+    LOG_INF("Re-select profile %d; forcing soft reconnect", index);
+#if IS_ENABLED(CONFIG_TOTEM_IDLE_DISCONNECT)
+    idle_go_dark = false;
+#endif
+    adv_throttled = false;
+#if IS_ENABLED(CONFIG_TOTEM_ADV_BOOST)
+    totem_adv_boost_arm();
+#endif
+    (void)zmk_ble_prof_disconnect(index);
+    request_advertising(ADV_RESTART);
+#endif
+}
+#endif
+
 int zmk_ble_prof_select(uint8_t index) {
     if (index >= ZMK_BLE_PROFILE_COUNT) {
         return -ERANGE;
@@ -1008,48 +1344,25 @@ int zmk_ble_prof_select(uint8_t index) {
             return 0;
         }
 #endif
-        /* Soft recovery: re-selecting the active profile forces disconnect +
-         * re-advertise. Helps macOS half-dead "Connected but no typing" without
-         * a full Forget + re-pair when the bond itself is still good. */
-        LOG_INF("Re-select profile %d; forcing soft reconnect", index);
-#if IS_ENABLED(CONFIG_TOTEM_IDLE_DISCONNECT)
-        idle_go_dark = false;
-#endif
-        adv_throttled = false;
-#if IS_ENABLED(CONFIG_TOTEM_ADV_BOOST)
-        totem_adv_boost_arm();
-#endif
-        (void)zmk_ble_prof_disconnect(index);
-        if (advertising_status == ZMK_ADV_CONN || advertising_status == ZMK_ADV_DIR) {
-            int err = bt_le_adv_stop();
-            if (err) {
-                LOG_WRN("Failed to stop advertising on reselect (err %d)", err);
-            }
-            advertising_status = ZMK_ADV_NONE;
-        }
-        update_advertising();
+        atomic_set(&adv_reselect_profile, index);
+        request_advertising(ADV_RESELECT);
 #endif
         return 0;
     }
 
+    k_spinlock_key_t key = k_spin_lock(&adv_target_lock);
     active_profile = index;
+    adv_target_version++;
+#if ZMK_BLE_PROFILE_HANDOFF
+    profile_handoff_pending = true;
+#endif
+    k_spin_unlock(&adv_target_lock, key);
     ble_save_profile();
 
 #if IS_ENABLED(CONFIG_TOTEM_ADV_THROTTLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
-    /* Raise first: exclusive-host drops the previous computer, then the profile
-     * listener arms advertising boost, then we (re)start advertising. Avoids
-     * advertising for the new profile while the old host still holds a link. */
+    /* Advertising listeners only queue work; no HCI wait on the key path. */
     raise_profile_changed_event();
-#if IS_ENABLED(CONFIG_ZMK_USB)
-    if (zmk_usb_is_powered()) {
-        /* Do not bt_le_adv_stop/start on the key path — that stalls USB HID.
-         * Existing ads keep running; apply the new profile 50 ms later. */
-        (void)k_work_schedule(&update_advertising_dwork, K_MSEC(50));
-    } else
-#endif
-    {
-        update_advertising();
-    }
+    k_work_submit(&update_advertising_work);
 #else
     update_advertising();
     raise_profile_changed_event();
@@ -1148,16 +1461,8 @@ int zmk_ble_set_device_name(char *name) {
         LOG_ERR("Failed to set new device name (err %d)", err);
         return err;
     }
-    if (advertising_status == ZMK_ADV_CONN) {
-        // Stop current advertising so it can restart with new name
-        err = bt_le_adv_stop();
-        advertising_status = ZMK_ADV_NONE;
-        if (err) {
-            LOG_ERR("Failed to stop advertising (err %d)", err);
-            return err;
-        }
-    }
-    return update_advertising();
+    request_advertising(ADV_RESTART);
+    return 0;
 }
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
@@ -1301,7 +1606,7 @@ static void connected(struct bt_conn *conn, uint8_t err) {
     }
 
     bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-    advertising_status = ZMK_ADV_NONE;
+    request_advertising(ADV_LINK_COMPLETE);
 
     if (err) {
         LOG_WRN("Failed to connect to %s (%u)", addr, err);
@@ -1310,13 +1615,6 @@ static void connected(struct bt_conn *conn, uint8_t err) {
     }
 
     LOG_DBG("Connected %s", addr);
-
-#if IS_ENABLED(CONFIG_TOTEM_DIR_THEN_OPEN) && IS_ENABLED(CONFIG_TOTEM_ADV_THROTTLE) &&             \
-    IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
-    if (is_conn_active_profile(conn)) {
-        totem_dir_phase_clear();
-    }
-#endif
 
     update_advertising();
 
@@ -1399,11 +1697,24 @@ static void le_param_updated(struct bt_conn *conn, uint16_t interval, uint16_t l
     LOG_DBG("%s: interval %d latency %d timeout %d", addr, interval, latency, timeout);
 }
 
+#if ZMK_BLE_PROFILE_HANDOFF
+static void handoff_identity_resolved(struct bt_conn *conn, const bt_addr_le_t *rpa,
+                                      const bt_addr_le_t *identity) {
+    ARG_UNUSED(conn);
+    ARG_UNUSED(rpa);
+    ARG_UNUSED(identity);
+    k_work_submit(&update_advertising_work);
+}
+#endif
+
 static struct bt_conn_cb conn_callbacks = {
     .connected = connected,
     .disconnected = disconnected,
     .security_changed = security_changed,
     .le_param_updated = le_param_updated,
+#if ZMK_BLE_PROFILE_HANDOFF
+    .identity_resolved = handoff_identity_resolved,
+#endif
 };
 
 /*

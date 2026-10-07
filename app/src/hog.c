@@ -235,6 +235,31 @@ static void input_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value) {
     host_requests_notification = (value == BT_GATT_CCC_NOTIFY) ? 1 : 0;
 }
 
+__weak void zmk_hog_subscription_observed(struct bt_conn *conn) { ARG_UNUSED(conn); }
+__weak bool zmk_hog_keyboard_report_attempted(struct bt_conn *conn, bool subscribed) {
+    ARG_UNUSED(conn);
+    ARG_UNUSED(subscribed);
+    return false;
+}
+__weak void zmk_hog_keyboard_report_result(struct bt_conn *conn, int err) {
+    ARG_UNUSED(conn);
+    ARG_UNUSED(err);
+}
+
+static void keyboard_report_complete(struct bt_conn *conn, void *user_data) {
+    ARG_UNUSED(user_data);
+    zmk_hog_keyboard_report_result(conn, 0);
+}
+
+static ssize_t keyboard_ccc_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                  const void *buf, uint16_t len, uint16_t offset, uint8_t flags) {
+    ssize_t result = bt_gatt_attr_write_ccc(conn, attr, buf, len, offset, flags);
+    if (result > 0 && (((const uint8_t *)buf)[0] & BT_GATT_CCC_NOTIFY)) {
+        zmk_hog_subscription_observed(conn);
+    }
+    return result;
+}
+
 static ssize_t write_ctrl_point(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                                 const void *buf, uint16_t len, uint16_t offset, uint8_t flags) {
     uint8_t *value = attr->user_data;
@@ -260,7 +285,10 @@ BT_GATT_SERVICE_DEFINE(
 
     BT_GATT_CHARACTERISTIC(BT_UUID_HIDS_REPORT, BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
                            BT_GATT_PERM_READ_ENCRYPT, read_hids_input_report, NULL, NULL),
-    BT_GATT_CCC(input_ccc_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_ATTRIBUTE(BT_UUID_GATT_CCC, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT,
+                      bt_gatt_attr_read_ccc, keyboard_ccc_write,
+                      ((struct _bt_gatt_ccc[]){
+                          BT_GATT_CCC_INITIALIZER(input_ccc_changed, NULL, NULL)})),
     BT_GATT_DESCRIPTOR(BT_UUID_HIDS_REPORT_REF, BT_GATT_PERM_READ_ENCRYPT, read_hids_report_ref,
                        NULL, &input),
 
@@ -322,7 +350,13 @@ void send_keyboard_report_callback(struct k_work *work) {
             .len = sizeof(report),
         };
 
+        bool track_completion = zmk_hog_keyboard_report_attempted(
+            conn, bt_gatt_is_subscribed(conn, &hog_svc.attrs[5], BT_GATT_CCC_NOTIFY));
+        notify_params.func = track_completion ? keyboard_report_complete : NULL;
         int err = bt_gatt_notify_cb(conn, &notify_params);
+        if (track_completion && err) {
+            zmk_hog_keyboard_report_result(conn, err);
+        }
         if (err == -EPERM) {
             bt_conn_set_security(conn, BT_SECURITY_L2);
         } else if (err) {
