@@ -251,13 +251,13 @@ static void keyboard_report_complete(struct bt_conn *conn, void *user_data) {
     zmk_hog_keyboard_report_result(conn, 0);
 }
 
-static ssize_t keyboard_ccc_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-                                  const void *buf, uint16_t len, uint16_t offset, uint8_t flags) {
-    ssize_t result = bt_gatt_attr_write_ccc(conn, attr, buf, len, offset, flags);
-    if (result > 0 && (((const uint8_t *)buf)[0] & BT_GATT_CCC_NOTIFY)) {
+static ssize_t keyboard_ccc_cfg_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                      uint16_t value) {
+    ARG_UNUSED(attr);
+    if (value & BT_GATT_CCC_NOTIFY) {
         zmk_hog_subscription_observed(conn);
     }
-    return result;
+    return sizeof(value);
 }
 
 static ssize_t write_ctrl_point(struct bt_conn *conn, const struct bt_gatt_attr *attr,
@@ -285,10 +285,11 @@ BT_GATT_SERVICE_DEFINE(
 
     BT_GATT_CHARACTERISTIC(BT_UUID_HIDS_REPORT, BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
                            BT_GATT_PERM_READ_ENCRYPT, read_hids_input_report, NULL, NULL),
-    BT_GATT_ATTRIBUTE(BT_UUID_GATT_CCC, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT,
-                      bt_gatt_attr_read_ccc, keyboard_ccc_write,
-                      ((struct _bt_gatt_ccc[]){
-                          BT_GATT_CCC_INITIALIZER(input_ccc_changed, NULL, NULL)})),
+    /* Keep the standard write handler: Zephyr identifies managed CCCs by its
+     * function pointer for persistence, identity resolution and reconnects. */
+    BT_GATT_CCC_MANAGED(((struct _bt_gatt_ccc[]){BT_GATT_CCC_INITIALIZER(
+        input_ccc_changed, keyboard_ccc_cfg_write, NULL)}),
+        BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
     BT_GATT_DESCRIPTOR(BT_UUID_HIDS_REPORT_REF, BT_GATT_PERM_READ_ENCRYPT, read_hids_report_ref,
                        NULL, &input),
 
