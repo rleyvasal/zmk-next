@@ -33,8 +33,9 @@ env:
   SYNC_BRANCH: upstream-sync
   TOTEM_BRANCH: totem
   TOTEM_CONFIG_REPO: rleyvasal/totem-zmk-config
-  # The totem-zmk-config branch that pins ZMK Next. Change it when daily work
-  # moves to another branch.
+  # The totem-zmk-config branch that pins ZMK Next until that work reaches the
+  # default branch. Once the default branch's west.yml uses zmk-next, the build
+  # follows the default branch instead and this value is ignored.
   TOTEM_CONFIG_REF: persistent-diagnostic-log
 
 jobs:
@@ -182,10 +183,22 @@ jobs:
     container:
       image: docker.io/zmkfirmware/zmk-build-arm:stable
     steps:
+      - name: Pick the totem-zmk-config branch
+        id: ref
+        run: |
+          base="https://raw.githubusercontent.com/$TOTEM_CONFIG_REPO/HEAD/config/west.yml"
+          if python3 -c "import sys, urllib.request; print(urllib.request.urlopen(sys.argv[1]).read().decode())" "$base" \
+              | grep -q 'repo-path: zmk-next'; then
+            echo "ref=" >> "$GITHUB_OUTPUT"
+            echo "Building the default branch"
+          else
+            echo "ref=$TOTEM_CONFIG_REF" >> "$GITHUB_OUTPUT"
+            echo "Building $TOTEM_CONFIG_REF"
+          fi
       - uses: actions/checkout@v7
         with:
           repository: ${{ env.TOTEM_CONFIG_REPO }}
-          ref: ${{ env.TOTEM_CONFIG_REF }}
+          ref: ${{ steps.ref.outputs.ref }}
           persist-credentials: false
       - name: Point west.yml at the merged totem commit
         env:
