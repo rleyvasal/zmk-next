@@ -14,12 +14,10 @@ The initial architecture is documented in
 
 ## Try it on a keyboard
 
-The shortest integration path is:
+Your existing config repo needs two edits:
 
-1. Point the `zmk` project in your config repo's `config/west.yml` at a pinned
-   ZMK Next revision.
-2. Enable `CONFIG_ZMK_STUDIO` and `CONFIG_ZMK_RUNTIME_CONFIG` on the keyboard's
-   USB/central build, and add the Studio USB transport snippet.
+1. Point the `zmk` project in `config/west.yml` at a ZMK Next release tag.
+2. Add `snippet: zmk-next` to the keyboard's USB/central build in `build.yaml`.
 3. Build and flash the firmware as usual.
 4. Run the downloadable ZMK Next Configurator locally and connect in a
    Web Serial-capable browser.

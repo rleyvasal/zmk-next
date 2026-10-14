@@ -5,9 +5,9 @@ your existing config repository, boards, shields, keymap, and normal build
 workflow. The firmware exposes supported keymap changes to the local ZMK Next
 Configurator over ZMK Studio's USB serial connection.
 
-This guide uses a pinned commit so an update cannot silently change the
-firmware protocol. The revision below is the version currently tested with the
-configurator.
+Adding ZMK Next takes two edits: one in `config/west.yml` and one in
+`build.yaml`. The guide pins a release tag so an update cannot silently change
+the firmware protocol. Use the configurator release with the same tag.
 
 ## 1. Point `west.yml` at ZMK Next
 
@@ -23,7 +23,7 @@ manifest:
     - name: zmk
       remote: zmk-next
       repo-path: zmk-next
-      revision: 34ff30a32721719552fbdbbf6ce10929992675fd
+      revision: v0.2.0
       import: app/west.yml
   self:
     path: config
@@ -32,34 +32,33 @@ manifest:
 The imported ZMK Next manifest brings in the matching protocol messages module,
 so your config does not need to list `zmk-next-messages` separately.
 
-## 2. Enable Studio and Runtime Config
+## 2. Add the `zmk-next` snippet in `build.yaml`
 
-Add the Studio USB snippet and the two feature flags to the build that is
-physically connected by USB:
+Add `snippet: zmk-next` to the build that is physically connected by USB. The
+snippet turns on ZMK Studio and Runtime Config and attaches the Studio
+connection to the USB serial port, so no `cmake-args` are needed:
 
 ```yaml
 include:
   - board: your_board
     shield: your_shield
-    snippet: studio-rpc-usb-uart
-    cmake-args: -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_RUNTIME_CONFIG=y
+    snippet: zmk-next
 ```
 
-For a split keyboard, enable them only on the central half. Build the peripheral
-half from the same pinned revision, but do not add the snippet or flags to it:
+For a split keyboard, add it only to the central half. The peripheral half is
+built from the same revision without the snippet:
 
 ```yaml
 include:
   - board: your_board
     shield: your_keyboard_left
-    snippet: studio-rpc-usb-uart
-    cmake-args: -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_RUNTIME_CONFIG=y
+    snippet: zmk-next
   - board: your_board
     shield: your_keyboard_right
 ```
 
 Replace the board and shield names with the values already used by your config.
-If the right half is your central half, put the flags and snippet there instead.
+If the right half is your central half, put the snippet there instead.
 
 ### Studio prerequisites
 
@@ -70,9 +69,10 @@ once:
   already prepared for ZMK Studio have one.
 - Studio is locked by default. Keep your existing `&studio_unlock` key/combo,
   or temporarily add `-DCONFIG_ZMK_STUDIO_LOCKING=n` while evaluating ZMK Next.
-- The generic `studio-rpc-usb-uart` snippet works for most boards. A board with
-  a custom or conflicting USB CDC setup may need a board-specific Studio RPC
-  snippet, as it would with upstream ZMK Studio.
+- The `zmk-next` snippet uses the same USB serial setup as upstream's
+  `studio-rpc-usb-uart` and works for most boards. A board with a custom or
+  conflicting USB CDC setup can instead keep its own Studio RPC snippet and add
+  `cmake-args: -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_RUNTIME_CONFIG=y`.
 
 To create layers later from the configurator, reserve the desired number of
 empty layer slots in the keymap. For example:
@@ -93,7 +93,8 @@ rebuilt. Connect the central half to the computer over USB.
 
 ## 4. Run the configurator locally
 
-Download a configurator archive from the project's GitHub Releases page,
+Download the configurator archive with the same tag from the
+[configurator Releases page](https://github.com/rleyvasal/zmk-next-configurator/releases),
 extract it, then launch:
 
 - macOS: `start.command`
@@ -111,7 +112,6 @@ the compiled keymap.
 
 ## Updating later
 
-ZMK Next is experimental. Update the pinned `revision` deliberately, rebuild
-both halves, and use the configurator release documented for that revision.
-Keeping the firmware revision pinned makes rollback as simple as restoring the
-previous SHA and rebuilding.
+ZMK Next is experimental. Update the pinned `revision` to a newer tag
+deliberately, rebuild both halves, and download the configurator release with
+the same tag. Rolling back is restoring the previous tag and rebuilding.
