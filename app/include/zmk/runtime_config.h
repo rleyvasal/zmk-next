@@ -30,6 +30,9 @@ enum zmk_runtime_action_kind {
     ZMK_RUNTIME_ACTION_NONE = 0,
     ZMK_RUNTIME_ACTION_COMPILED_BEHAVIOR = 1,
     ZMK_RUNTIME_ACTION_OBJECT = 2,
+    // A combo-output-only directive: suppress the devicetree-compiled combo
+    // at this combo's key positions instead of firing any behavior.
+    ZMK_RUNTIME_ACTION_SUPPRESS_COMPILED = 3,
 };
 
 struct zmk_runtime_action_ref {

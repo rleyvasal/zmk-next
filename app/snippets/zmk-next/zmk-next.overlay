@@ -1,0 +1,18 @@
+/*
+ * Copyright (c) 2026 The ZMK Next Contributors
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+/ {
+    chosen {
+        zmk,studio-rpc-uart = &snippet_zmk_next_rpc_uart;
+    };
+};
+
+&zephyr_udc0 {
+    snippet_zmk_next_rpc_uart: snippet_zmk_next_rpc_uart {
+        compatible = "zephyr,cdc-acm-uart";
+    };
+};
+

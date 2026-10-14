@@ -1,0 +1,10 @@
+# Copyright (c) 2026 The ZMK Next Contributors
+# SPDX-License-Identifier: MIT
+
+# Everything a ZMK Next build needs on the half connected over USB: ZMK Studio,
+# Runtime Config, and the Studio RPC transport on a USB CDC ACM serial port.
+name: zmk-next
+append:
+  DTS_EXTRA_CPPFLAGS: -DZMK_BEHAVIORS_KEEP_ALL
+  EXTRA_DTC_OVERLAY_FILE: zmk-next.overlay
+  EXTRA_CONF_FILE: zmk-next.conf

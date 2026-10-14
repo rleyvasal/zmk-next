@@ -666,7 +666,7 @@ static int keymap_track_changed_bindings(const char *key, size_t len, settings_r
 int zmk_keymap_reset_settings(void) {
     settings_delete(LAYER_ORDER_SETTINGS_KEY);
 
-    uint8_t zmk_keymap_layer_changes[ZMK_KEYMAP_LAYERS_LEN][PENDING_ARRAY_SIZE];
+    uint8_t zmk_keymap_layer_changes[ZMK_KEYMAP_LAYERS_LEN][PENDING_ARRAY_SIZE] = {0};
 
     settings_load_subtree_direct("keymap", keymap_track_changed_bindings,
                                  &zmk_keymap_layer_changes);
