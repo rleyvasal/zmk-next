@@ -10,10 +10,8 @@ name: Upstream sync
 # Workflows write access as the UPSTREAM_SYNC_TOKEN secret so those syncs can
 # push; without it they fall back to GITHUB_TOKEN and are reported as failed.
 #
-# Totem: after a release (or on a run with nothing new upstream), merge the
-# latest release tag into the `totem` branch, then build every image in
-# totem-zmk-config's build.yaml against it. This never edits totem-zmk-config;
-# its west.yml moves only when someone chooses to flash a new build.
+# Forks that merge ZMK Next releases (such as rleyvasal/zmk-totem) inherit
+# this file; the repository check keeps it from running there.
 
 on:
   schedule:
@@ -31,15 +29,10 @@ permissions:
 env:
   UPSTREAM_URL: https://github.com/zmkfirmware/zmk.git
   SYNC_BRANCH: upstream-sync
-  TOTEM_BRANCH: totem
-  TOTEM_CONFIG_REPO: rleyvasal/totem-zmk-config
-  # The totem-zmk-config branch that pins ZMK Next until that work reaches the
-  # default branch. Once the default branch's west.yml uses zmk-next, the build
-  # follows the default branch instead and this value is ignored.
-  TOTEM_CONFIG_REF: persistent-diagnostic-log
 
 jobs:
   merge:
+    if: ${{ github.repository == 'rleyvasal/zmk-next' }}
     runs-on: ubuntu-latest
     outputs:
       changed: ${{ steps.merge.outputs.changed }}
@@ -136,126 +129,6 @@ jobs:
 
           gh release create "$next" --title "ZMK Next $next" --notes \
             "Merges upstream ZMK up to zmkfirmware/zmk@${UPSTREAM_SHA:0:12}. No Runtime Config protocol changes: use any ZMK Next Configurator v${major}.${minor}.x release."
-
-  totem-merge:
-    needs: [merge, release]
-    if: ${{ always() && (needs.release.result == 'success' || (needs.merge.result == 'success' && needs.merge.outputs.changed == 'false')) }}
-    runs-on: ubuntu-latest
-    outputs:
-      sha: ${{ steps.merge.outputs.sha }}
-      tag: ${{ steps.merge.outputs.tag }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ env.TOTEM_BRANCH }}
-          fetch-depth: 0
-          token: ${{ secrets.UPSTREAM_SYNC_TOKEN || github.token }}
-      - name: Merge the latest release into totem
-        id: merge
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch --tags origin
-          tag="$(git tag --list 'v*' --sort=-v:refname | head -1)"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
-          if ! git merge --no-edit -m "Merge $tag into $TOTEM_BRANCH" "$tag"; then
-            # The generic docs always win; anything else needs a person.
-            git diff --name-only --diff-filter=U | grep -E '^(README\.md|docs/)' \
-              | xargs -r git checkout --theirs --
-            git diff --name-only --diff-filter=U | grep -E '^(README\.md|docs/)' | xargs -r git add --
-            if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
-              git diff --name-only --diff-filter=U
-              git merge --abort
-              exit 1
-            fi
-            git commit --no-edit
-          fi
-          git push origin "HEAD:$TOTEM_BRANCH"
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-  totem-build:
-    needs: totem-merge
-    # always(): a skipped release job upstream of totem-merge would otherwise
-    # skip this job too.
-    if: ${{ always() && needs.totem-merge.result == 'success' }}
-    runs-on: ubuntu-latest
-    container:
-      image: docker.io/zmkfirmware/zmk-build-arm:stable
-    steps:
-      - name: Pick the totem-zmk-config branch
-        id: ref
-        run: |
-          base="https://raw.githubusercontent.com/$TOTEM_CONFIG_REPO/HEAD/config/west.yml"
-          if python3 -c "import sys, urllib.request; print(urllib.request.urlopen(sys.argv[1]).read().decode())" "$base" \
-              | grep -q 'repo-path: zmk-next'; then
-            echo "ref=" >> "$GITHUB_OUTPUT"
-            echo "Building the default branch"
-          else
-            echo "ref=$TOTEM_CONFIG_REF" >> "$GITHUB_OUTPUT"
-            echo "Building $TOTEM_CONFIG_REF"
-          fi
-      - uses: actions/checkout@v7
-        with:
-          repository: ${{ env.TOTEM_CONFIG_REPO }}
-          ref: ${{ steps.ref.outputs.ref }}
-          persist-credentials: false
-      - name: Point west.yml at the merged totem commit
-        env:
-          SHA: ${{ needs.totem-merge.outputs.sha }}
-        run: |
-          python3 - "$SHA" <<'PY'
-          import re, sys
-          path = "config/west.yml"
-          text = open(path).read()
-          block = re.search(r"^    - name: zmk\n(?:      .*\n|\s*#.*\n)*", text, re.M)
-          new = re.sub(r"^      revision: .*$", f"      revision: {sys.argv[1]}", block.group(0), flags=re.M)
-          new = re.sub(r"^      repo-path: .*$", "      repo-path: zmk-next", new, flags=re.M)
-          open(path, "w").write(text.replace(block.group(0), new))
-          PY
-          grep -n -A5 'name: zmk$' config/west.yml
-      - name: West workspace
-        run: |
-          west init -l config
-          west update --fetch-opt=--filter=tree:0
-          west zephyr-export
-      - name: Build every build.yaml entry
-        shell: bash
-        run: |
-          python3 - <<'PY' > "$RUNNER_TEMP/builds.txt"
-          import yaml
-          for i, b in enumerate(yaml.safe_load(open("build.yaml"))["include"]):
-              print("\t".join([str(i), b["board"], b.get("shield", ""), b.get("snippet", ""), b.get("cmake-args", "")]))
-          PY
-          base="$PWD"
-          while IFS=$'\t' read -r i board shield snippet cmake_args; do
-            echo "::group::$board $shield $snippet"
-            west build -p -s zmk/app -d "build/$i" -b "$board" ${snippet:+-S "$snippet"} -- \
-              -DZMK_CONFIG="$base/config" -DZMK_EXTRA_MODULES="$base" \
-              ${shield:+-DSHIELD="$shield"} $cmake_args
-            echo "::endgroup::"
-          done < "$RUNNER_TEMP/builds.txt"
-
-  totem-report:
-    needs: [totem-merge, totem-build]
-    if: ${{ always() && (needs.totem-merge.result == 'failure' || needs.totem-build.result == 'failure') }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Open an issue
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          TAG: ${{ needs.totem-merge.outputs.tag }}
-        run: |
-          title="Totem sync failed"
-          body="Merging the latest release ${TAG} into the \`$TOTEM_BRANCH\` branch, or building totem-zmk-config ($TOTEM_CONFIG_REF) against it, failed. totem-zmk-config was not changed. Run: $RUN_URL"
-          existing="$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')"
-          if [ -n "$existing" ]; then
-            gh issue comment "$existing" --body "$body"
-          else
-            gh issue create --title "$title" --body "$body"
-          fi
 
   report:
     needs: [merge, test, release]
