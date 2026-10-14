@@ -175,6 +175,9 @@ jobs:
 
   totem-build:
     needs: totem-merge
+    # always(): a skipped release job upstream of totem-merge would otherwise
+    # skip this job too.
+    if: ${{ always() && needs.totem-merge.result == 'success' }}
     runs-on: ubuntu-latest
     container:
       image: docker.io/zmkfirmware/zmk-build-arm:stable
