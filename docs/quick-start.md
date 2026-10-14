@@ -7,7 +7,8 @@ Configurator over ZMK Studio's USB serial connection.
 
 Adding ZMK Next takes two edits: one in `config/west.yml` and one in
 `build.yaml`. The guide pins a release tag so an update cannot silently change
-the firmware protocol. Use the configurator release with the same tag.
+the firmware protocol. Use a configurator release with the same major and minor
+version (any v0.2.x configurator works with any v0.2.x firmware).
 
 ## 1. Point `west.yml` at ZMK Next
 
@@ -93,7 +94,7 @@ rebuilt. Connect the central half to the computer over USB.
 
 ## 4. Run the configurator locally
 
-Download the configurator archive with the same tag from the
+Download a configurator archive with the same major and minor version from the
 [configurator Releases page](https://github.com/rleyvasal/zmk-next-configurator/releases),
 extract it, then launch:
 
@@ -112,6 +113,10 @@ the compiled keymap.
 
 ## Updating later
 
-ZMK Next is experimental. Update the pinned `revision` to a newer tag
-deliberately, rebuild both halves, and download the configurator release with
-the same tag. Rolling back is restoring the previous tag and rebuilding.
+ZMK Next merges upstream ZMK every week and tags a patch release (for example
+v0.2.1) when the merge passes its tests. Patch releases never change the
+configurator protocol. A new minor version (v0.3.0) means a new configurator
+release is needed too.
+
+Update the pinned `revision` to a newer tag deliberately and rebuild both
+halves. Rolling back is restoring the previous tag and rebuilding.

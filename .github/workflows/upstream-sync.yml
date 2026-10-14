@@ -1,0 +1,154 @@
+name: Upstream sync
+
+# Weekly: merge zmkfirmware/zmk main into this fork, run the Runtime Config
+# tests and the documented two-edit build, then fast-forward main and tag the
+# next patch release (v0.2.0 -> v0.2.1). A conflict or a failing check leaves
+# the merge on the upstream-sync branch and opens an issue instead.
+#
+# GITHUB_TOKEN cannot push commits that change .github/workflows, and upstream
+# edits its workflows regularly. Add a fine-grained token with Contents and
+# Workflows write access as the UPSTREAM_SYNC_TOKEN secret so those syncs can
+# push; without it they fall back to GITHUB_TOKEN and are reported as failed.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+env:
+  UPSTREAM_URL: https://github.com/zmkfirmware/zmk.git
+  SYNC_BRANCH: upstream-sync
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.merge.outputs.changed }}
+      conflict: ${{ steps.merge.outputs.conflict }}
+      sha: ${{ steps.merge.outputs.sha }}
+      upstream-sha: ${{ steps.merge.outputs.upstream-sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN || github.token }}
+      - name: Merge upstream main
+        id: merge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --no-tags "$UPSTREAM_URL" main
+          upstream_sha="$(git rev-parse FETCH_HEAD)"
+          echo "upstream-sha=$upstream_sha" >> "$GITHUB_OUTPUT"
+
+          if git merge-base --is-ancestor "$upstream_sha" HEAD; then
+            echo "Already up to date with upstream $upstream_sha"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+          if git merge --no-ff --no-edit -m "Merge upstream ZMK ${upstream_sha:0:12}" "$upstream_sha"; then
+            echo "conflict=false" >> "$GITHUB_OUTPUT"
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            git push --force origin "HEAD:refs/heads/$SYNC_BRANCH"
+          else
+            git diff --name-only --diff-filter=U | tee "$RUNNER_TEMP/conflicts.txt"
+            git merge --abort
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+            # Leave upstream's tip on the branch so the conflict can be
+            # resolved by merging it into main locally.
+            git push --force origin "$upstream_sha:refs/heads/$SYNC_BRANCH"
+          fi
+      - name: Upload conflict list
+        if: ${{ steps.merge.outputs.conflict == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: conflicts
+          path: ${{ runner.temp }}/conflicts.txt
+
+  test:
+    needs: merge
+    if: ${{ needs.merge.outputs.changed == 'true' && needs.merge.outputs.conflict == 'false' }}
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/zmkfirmware/zmk-build-arm:4.1
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.merge.outputs.sha }}
+          persist-credentials: false
+      - run: west init -l app
+      - run: west update --fetch-opt=--filter=tree:0
+      - run: west zephyr-export
+      - name: Runtime Config tests
+        working-directory: app
+        run: ZMK_TESTS_VERBOSE=1 west test tests/runtime-config
+      - name: Two-edit install build (Corne, nice!nano)
+        run: |
+          west build -p -s app -d build/left -b nice_nano//zmk -S zmk-next -- -DSHIELD=corne_left
+          west build -p -s app -d build/right -b nice_nano//zmk -- -DSHIELD=corne_right
+          grep -q '^CONFIG_ZMK_RUNTIME_CONFIG_RPC=y' build/left/zephyr/.config
+
+  release:
+    needs: [merge, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN || github.token }}
+      - name: Fast-forward main and tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.merge.outputs.sha }}
+          UPSTREAM_SHA: ${{ needs.merge.outputs.upstream-sha }}
+        run: |
+          git merge --ff-only "$SHA"
+          git push origin HEAD:main
+
+          last="$(git tag --list 'v*' --sort=-v:refname | head -1)"
+          IFS=. read -r major minor patch <<< "${last#v}"
+          next="v${major}.${minor}.$((patch + 1))"
+          git tag "$next" "$SHA"
+          git push origin "$next"
+
+          gh release create "$next" --title "ZMK Next $next" --notes \
+            "Merges upstream ZMK up to zmkfirmware/zmk@${UPSTREAM_SHA:0:12}. No Runtime Config protocol changes: use any ZMK Next Configurator v${major}.${minor}.x release."
+
+  report:
+    needs: [merge, test, release]
+    if: ${{ always() && needs.merge.outputs.changed == 'true' && (needs.merge.result == 'failure' || needs.merge.outputs.conflict == 'true' || needs.test.result == 'failure' || needs.release.result == 'failure') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open an issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CONFLICT: ${{ needs.merge.outputs.conflict }}
+          UPSTREAM_SHA: ${{ needs.merge.outputs.upstream-sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ "$CONFLICT" = "true" ]; then
+            title="Upstream ZMK sync has merge conflicts"
+            body="Merging zmkfirmware/zmk@${UPSTREAM_SHA:0:12} into main conflicts. Upstream's tip is on the \`$SYNC_BRANCH\` branch; the conflicting files are in the run's \`conflicts\` artifact. Run: $RUN_URL"
+          else
+            title="Upstream ZMK sync failed"
+            body="Syncing zmkfirmware/zmk@${UPSTREAM_SHA:0:12} failed, so main was not updated. Check the run for a failed push (upstream changed workflows and UPSTREAM_SYNC_TOKEN is missing), failing tests, the Corne build, or the release step. Run: $RUN_URL"
+          fi
+          existing="$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi
