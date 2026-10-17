@@ -1,0 +1,35 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  What the board's battery charger can tell ZMK. Select it with the
+  zmk,battery-charger chosen node. Every property is optional.
+
+  While external power (USB) is present, the cell sits at charge voltage, so a
+  voltage reading says little about how full it is. ZMK then reports the last
+  level it measured on battery, and with these properties can do better:
+  status-gpios tells charging from full, and charge-current-microamp with
+  charge-full-design-microamp-hours lets it estimate the level rising while
+  charging.
+
+  ZMK uses it only with CONFIG_ZMK_BATTERY_HOLD_ON_EXTERNAL_POWER.
+
+compatible: "zmk,battery-charger"
+
+properties:
+  status-gpios:
+    type: phandle-array
+    description: |
+      Charger status output, asserted while the battery is charging (for
+      example the CHG pin of a BQ25101 or MCP73831, active low). With external
+      power present and this deasserted, the charge is complete.
+      Only native tests cover this so far; it has not been verified on a
+      board (the XIAO nRF52840's CHG pin did not report charging).
+
+  charge-current-microamp:
+    type: int
+    description: Charge current the charger is set to, in microamps.
+
+  charge-full-design-microamp-hours:
+    type: int
+    description: Battery capacity, in microamp-hours (the same property name as Zephyr's battery binding).

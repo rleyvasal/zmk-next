@@ -48,6 +48,27 @@ config ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_PROXY
       Adds support for reporting the battery levels of connected split
       peripherals through an additional Battery Level service.
 
+config ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_PROXY_SWAP
+    bool "Report the peripheral in the primary Battery Service"
+    depends on ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_PROXY
+    depends on ZMK_SPLIT_BLE_CENTRAL_PERIPHERALS = 1
+    help
+      Swap the two Battery Services for a two-half keyboard: the primary BAS
+      reports the peripheral, and the additional one reports this central
+      half, labeled "Left" with the "main" description. Host battery apps that
+      read the primary BAS as the right half and the second one as the left
+      half (Mighty Mitts on macOS) then show both halves. Notifications for
+      each half are rate-limited to one per second. With
+      CONFIG_ZMK_BATTERY_CHARGE_STATUS, the primary BAS's Battery Level Status
+      carries the peripheral's charge state.
+
+config ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_RETAIN
+    bool "Keep a peripheral's last battery level while it is disconnected"
+    help
+      By default a disconnected peripheral's level drops to 0. With this
+      option the last level read from it is kept, for Studio and for the
+      proxy, until a read after reconnecting replaces it.
+
 endif
 
 config ZMK_SPLIT_BLE_CENTRAL_POSITION_QUEUE_SIZE

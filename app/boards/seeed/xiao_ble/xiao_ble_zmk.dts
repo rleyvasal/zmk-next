@@ -13,6 +13,21 @@ sd_partition: &reserved_partition_0 { };
 / {
     chosen {
         zmk,battery = &vbatt;
+        zmk,battery-charger = &xiao_charger;
+    };
+
+    /* BQ25101: charges at 50 mA unless P0.13 is driven low (100 mA), which ZMK
+     * does not do. A keyboard adds its battery's
+     * charge-full-design-microamp-hours to get a charging estimate
+     * (CONFIG_ZMK_BATTERY_HOLD_ON_EXTERNAL_POWER).
+     *
+     * No status-gpios: on a XIAO nRF52840 Sense, P0.17 (CHG) read "not charging"
+     * with GPIO_ACTIVE_LOW | GPIO_PULL_UP while the cell charged from 4029 to
+     * 4213 mV on USB, so it cannot tell charging from full.
+     */
+    xiao_charger: xiao_charger {
+        compatible = "zmk,battery-charger";
+        charge-current-microamp = <50000>;
     };
 
     vbatt: vbatt {
