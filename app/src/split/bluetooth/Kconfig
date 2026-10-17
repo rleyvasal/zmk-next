@@ -48,6 +48,14 @@ config ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_PROXY
       Adds support for reporting the battery levels of connected split
       peripherals through an additional Battery Level service.
 
+config ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_RETAIN
+    bool "Keep a peripheral's last battery level while it is disconnected"
+    help
+      By default a disconnected peripheral's level drops to 0. With this
+      option the last level read from it is kept, for Studio and for the
+      proxy, until a read after reconnecting replaces it.
+
+
 endif
 
 config ZMK_SPLIT_BLE_CENTRAL_POSITION_QUEUE_SIZE
