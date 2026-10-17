@@ -219,6 +219,61 @@ struct ring_buf *zmk_rpc_get_tx_buf(void);
 struct ring_buf *zmk_rpc_get_rx_buf(void);
 void zmk_rpc_rx_notify(void);
 
+/** Re-enable Studio UART IRQs after USB CDC is configured (boot race). */
+void zmk_studio_uart_rearm(void);
+
+#if IS_ENABLED(CONFIG_ZMK_STUDIO_RPC_RAW_FRAMES)
+
+/**
+ * @brief Raw frames share the Studio framing (SOF/ESC/EOF) with protobuf RPC messages, but carry
+ *        an application payload whose first byte is a one-byte prefix instead of a protobuf tag.
+ *
+ * A prefix is only valid if it can never start an encoded zmk_studio_Request/Response: its low
+ * three bits (the protobuf wire type) must be 3, 4, 6 or 7, which proto3 never emits. Examples:
+ * 'C' (0x43), 'D' (0x44), 'G' (0x47), 'K' (0x4B), 'L' (0x4C).
+ */
+#define ZMK_RPC_RAW_FRAME_PREFIX_VALID(p)                                                          \
+    (((p) & 0x07) == 3 || ((p) & 0x07) == 4 || ((p) & 0x07) == 6 || ((p) & 0x07) == 7)
+
+/** Largest raw frame payload (prefix included) delivered to a raw frame handler. */
+#define ZMK_RPC_RAW_FRAME_RX_MAX 32
+
+typedef void (*zmk_rpc_raw_frame_handler_func)(const uint8_t *payload, size_t len);
+
+struct zmk_rpc_raw_frame_handler {
+    uint8_t prefix;
+    zmk_rpc_raw_frame_handler_func func;
+};
+
+/**
+ * @brief Register a handler for host-to-device raw frames whose first payload byte is `_prefix`.
+ *        The handler runs on the Studio RPC thread and receives the whole payload, prefix
+ *        included, truncated to ZMK_RPC_RAW_FRAME_RX_MAX bytes. Such frames never reach the
+ *        protobuf decoder and get no RPC response.
+ */
+#define ZMK_RPC_RAW_FRAME_HANDLER(name, _prefix, _func)                                            \
+    BUILD_ASSERT(ZMK_RPC_RAW_FRAME_PREFIX_VALID(_prefix),                                          \
+                 "Raw frame prefix would collide with a protobuf field tag");                      \
+    STRUCT_SECTION_ITERABLE(zmk_rpc_raw_frame_handler, name) = {                                   \
+        .prefix = _prefix,                                                                         \
+        .func = _func,                                                                             \
+    }
+
+/**
+ * @brief Send one device-to-host raw frame on the selected Studio transport.
+ *
+ * Never blocks: if another sender holds the transport, or the whole escaped frame does not fit in
+ * the TX buffer, nothing is written and -EAGAIN is returned. Callers that can lose data (logs)
+ * should simply drop it; it is safe to call from a work queue.
+ *
+ * @param payload Payload bytes; payload[0] must satisfy ZMK_RPC_RAW_FRAME_PREFIX_VALID.
+ * @param len Payload length, including the prefix byte.
+ * @retval 0 on success, -EINVAL, -ENOTCONN (no transport), -EMSGSIZE or -EAGAIN otherwise.
+ */
+int zmk_rpc_send_raw_frame(const uint8_t *payload, size_t len);
+
+#endif // IS_ENABLED(CONFIG_ZMK_STUDIO_RPC_RAW_FRAMES)
+
 #define ZMK_RPC_TRANSPORT(name, _transport, _rx_start, _rx_stop, _tx_user_data, _tx_notify)        \
     STRUCT_SECTION_ITERABLE(zmk_rpc_transport, name) = {                                           \
         .transport = _transport,                                                                   \

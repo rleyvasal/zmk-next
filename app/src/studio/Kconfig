@@ -109,6 +109,16 @@ config ZMK_STUDIO_RPC_TX_BUF_SIZE
     int "TX Buffer Size"
     default 64
 
+config ZMK_STUDIO_RPC_RAW_FRAMES
+    bool "Raw frames for modules"
+    help
+      Let modules exchange their own frames with the host over the Studio
+      connection, next to the protobuf RPC messages: zmk_rpc_send_raw_frame()
+      and ZMK_RPC_RAW_FRAME_HANDLER() in <zmk/studio/rpc.h>. A raw frame uses
+      the same framing, and its first byte is a prefix that can never start a
+      protobuf message. Modules that need this, such as a log stream, select
+      it. When off, every frame goes to the protobuf decoder as before.
+
 endif
 
 endif

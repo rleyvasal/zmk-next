@@ -20,4 +20,6 @@ jobs:
         run: python app/tests/settings/startup/test_settings_loaded.py -v
       - name: Test the Studio UART TX path
         run: python app/tests/studio/uart_tx/test_uart_tx.py -v
+      - name: Test Studio raw frames
+        run: python app/tests/studio/raw_tx/test_raw_tx.py -v
       - uses: pre-commit/action@v3.0.1

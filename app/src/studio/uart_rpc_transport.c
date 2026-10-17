@@ -20,6 +20,18 @@ LOG_MODULE_DECLARE(zmk_studio, CONFIG_ZMK_STUDIO_LOG_LEVEL);
 
 static const struct device *const uart_dev = DEVICE_DT_GET(UART_DEVICE_NODE);
 
+void zmk_studio_uart_rearm(void) {
+    if (!device_is_ready(uart_dev)) {
+        return;
+    }
+#if IS_ENABLED(CONFIG_UART_INTERRUPT_DRIVEN)
+    /* RX only. TX irq is enabled from tx_notify when a frame is queued.
+     * Do not set DCD/DSR here: that is a USB control transfer every call
+     * and stalls HID if we poll. */
+    uart_irq_rx_enable(uart_dev);
+#endif
+}
+
 static void tx_notify(struct ring_buf *tx_ring_buf, size_t written, bool msg_done,
                       void *user_data) {
     if (msg_done || (ring_buf_size_get(tx_ring_buf) > (ring_buf_capacity_get(tx_ring_buf) / 2))) {
@@ -70,9 +82,8 @@ K_THREAD_DEFINE(uart_transport_read_thread, CONFIG_ZMK_STUDIO_TRANSPORT_UART_RX_
 #endif
 
 static int start_rx() {
-#if IS_ENABLED(CONFIG_UART_INTERRUPT_DRIVEN)
-    uart_irq_rx_enable(uart_dev);
-#else
+    zmk_studio_uart_rearm();
+#if !IS_ENABLED(CONFIG_UART_INTERRUPT_DRIVEN)
     k_thread_resume(uart_transport_read_thread);
 #endif
     return 0;
