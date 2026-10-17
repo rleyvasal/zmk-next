@@ -1,4 +1,7 @@
-"""Transport choice and host advertising while USB power is present, with each option off and on."""
+"""Transport choice while USB power is present, with the option off and on.
+
+Host advertising on USB power (CONFIG_ZMK_BLE_HOST_ADV_OFF_ON_USB) is covered by
+ble/advertising_worker."""
 
 import os
 from pathlib import Path
@@ -38,57 +41,6 @@ int main(void) {
 }
 """
 
-ADV_HARNESS = r"""
-#include <assert.h>
-#include <stdbool.h>
-#include <stddef.h>
-#define IS_ENABLED(x) x
-#define LOG_DBG(...) ((void)0)
-enum advertising_type { ZMK_ADV_NONE, ZMK_ADV_DIR, ZMK_ADV_CONN };
-#define CURR_ADV(adv) (adv << 4)
-static enum advertising_type advertising_status;
-static int starts, stops;
-#define CHECKED_ADV_STOP() (stops++, advertising_status = ZMK_ADV_NONE)
-#define CHECKED_DIR_ADV() assert(0)
-#define CHECKED_OPEN_ADV() (starts++, advertising_status = ZMK_ADV_CONN)
-typedef int bt_addr_le_t;
-struct bt_conn { int unused; };
-static bool profile_open, profile_connected, usb_powered;
-static bool zmk_ble_active_profile_is_open(void) { return profile_open; }
-static bool zmk_ble_active_profile_is_connected(void) { return profile_connected; }
-static bool zmk_usb_is_powered(void) { return usb_powered; }
-/* ACTUAL_UPDATE */
-int main(void) {
-    /* Open profile on battery: advertise. */
-    profile_open = true;
-    update_advertising();
-    assert(advertising_status == ZMK_ADV_CONN && starts == 1);
-
-    /* Cable in: stop advertising with the option, keep it without. */
-    usb_powered = true;
-    update_advertising();
-    assert(advertising_status == (ADV_OFF ? ZMK_ADV_NONE : ZMK_ADV_CONN));
-    assert(stops == (ADV_OFF ? 1 : 0) && starts == 1);
-
-    /* Bonded but disconnected profile while cabled: still none with the option. */
-    profile_open = false;
-    update_advertising();
-    assert(advertising_status == (ADV_OFF ? ZMK_ADV_NONE : ZMK_ADV_CONN));
-
-    /* Cable out: advertising resumes. */
-    usb_powered = false;
-    update_advertising();
-    assert(advertising_status == ZMK_ADV_CONN && starts == (ADV_OFF ? 2 : 1));
-
-    /* A connected host needs no advertising either way. */
-    profile_connected = true;
-    update_advertising();
-    assert(advertising_status == ZMK_ADV_NONE);
-    return 0;
-}
-"""
-
-
 def _function(source, signature):
     start = source.index(signature)
     return source[start:source.index("\n}", start) + 3]
@@ -121,15 +73,6 @@ class CabledTests(unittest.TestCase):
                 _compile_and_run(harness, f"endpoint_{on}",
                                  [f"-DCONFIG_ZMK_USB_NO_BLE_FALLBACK_WHEN_POWERED={on}",
                                   f"-DNO_FALLBACK={on}"])
-
-    def test_host_advertising_while_powered(self):
-        source = (self.app / "src/ble.c").read_text()
-        update = _function(source, "int update_advertising(void) {")
-        harness = ADV_HARNESS.replace("/* ACTUAL_UPDATE */", update)
-        for on in (0, 1):
-            with self.subTest(adv_off=on):
-                _compile_and_run(harness, f"adv_{on}",
-                                 [f"-DCONFIG_ZMK_BLE_HOST_ADV_OFF_ON_USB={on}", f"-DADV_OFF={on}"])
 
 
 if __name__ == "__main__":

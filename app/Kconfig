@@ -223,6 +223,137 @@ config ZMK_BLE_PASSKEY_ENTRY
 config BT_SMP_ALLOW_UNAUTH_OVERWRITE
     imply ZMK_BLE_PASSKEY_ENTRY
 
+config ZMK_BLE_DIAGNOSTIC_HOOKS
+    bool "Weak hooks for watching HID subscriptions and report delivery"
+    help
+      Call the weak zmk_hog_subscription_observed(),
+      zmk_hog_keyboard_report_attempted() and zmk_hog_keyboard_report_result()
+      hooks (see <zmk/hog.h>), so a module can log or count them. The HID CCC
+      becomes a managed CCC with a write callback, and keyboard notifications
+      can request a completion callback. Off, hog.c is unchanged.
+
+menu "Multi-host advertising (split central)"
+    depends on ZMK_SPLIT_ROLE_CENTRAL
+
+config ZMK_BLE_ADV_TIMEOUT
+    bool "Pause advertising after the selected host has been away for a while"
+    help
+      When the selected profile's host has been disconnected for
+      CONFIG_ZMK_BLE_ADV_TIMEOUT_MIN minutes, stop advertising to save power.
+      A key press on either half resumes it; the first press or two may be
+      lost while the host reconnects. Nothing can connect while advertising is
+      paused, so other bonded hosts can't keep connecting either. On USB power
+      the pause does not start. The other options in this menu build on this one.
+
+config ZMK_BLE_ADV_TIMEOUT_MIN
+    int "Minutes the selected host may be away before advertising pauses"
+    depends on ZMK_BLE_ADV_TIMEOUT
+    default 5
+
+config ZMK_BLE_ADV_BOOST
+    bool "Faster advertising after a profile switch or a resume"
+    depends on ZMK_BLE_ADV_TIMEOUT
+    help
+      For CONFIG_ZMK_BLE_ADV_BOOST_SEC after a profile switch, or after a key
+      press resumes paused advertising, advertise at the GAP fast interval 1
+      (30-60 ms) instead of fast interval 2 (100-150 ms), so the selected host
+      finds the keyboard sooner.
+
+config ZMK_BLE_ADV_BOOST_SEC
+    int "Seconds of faster advertising"
+    depends on ZMK_BLE_ADV_BOOST
+    default 12
+    range 3 60
+
+config ZMK_BLE_ADV_POST_SWITCH_DARK
+    bool "Pause advertising if the selected host doesn't connect during the boost"
+    depends on ZMK_BLE_ADV_BOOST
+    help
+      When the boost window after a profile switch ends and the selected host
+      is still not connected, pause advertising until a key press. This keeps
+      other bonded hosts from connecting and disconnecting in a loop.
+
+config ZMK_BLE_DIRECTED_ADV
+    bool "Directed advertising to the selected host after a profile switch"
+    depends on ZMK_BLE_ADV_TIMEOUT
+    help
+      After a profile switch to a bonded profile, advertise directed to that
+      host for CONFIG_ZMK_BLE_DIRECTED_ADV_SEC (asking for an RPA target first,
+      for hosts that use privacy), then fall back to open advertising. If
+      directed advertising fails to start, open advertising starts at once.
+
+config ZMK_BLE_DIRECTED_ADV_SEC
+    int "Seconds of directed advertising after a profile switch"
+    depends on ZMK_BLE_DIRECTED_ADV
+    default 4
+    range 1 15
+
+config ZMK_BLE_ADV_FILTER_ACTIVE_PROFILE
+    bool "Only the selected profile's host may connect"
+    depends on ZMK_BLE_ADV_TIMEOUT
+    select BT_FILTER_ACCEPT_LIST
+    help
+      When the selected profile is bonded, advertise with the filter accept
+      list holding only that host (BT_LE_ADV_OPT_FILTER_CONN), so other bonded
+      hosts can't connect. The stored address is checked against its bond
+      first. Open profiles advertise unfiltered for pairing. Setup errors are
+      retried rather than falling back to unfiltered advertising.
+
+config ZMK_BLE_RESELECT_RECONNECT
+    bool "Selecting the active profile again reconnects its host"
+    depends on ZMK_BLE_ADV_TIMEOUT
+    help
+      Selecting the profile that is already active disconnects its host, if
+      connected, and advertises again (with the boost, if enabled). This is a soft recovery
+      for a link that is up but not delivering keys, without re-pairing. It is
+      skipped on USB power with CONFIG_ZMK_BLE_HOST_ADV_OFF_ON_USB.
+
+config ZMK_BLE_IDLE_DISCONNECT
+    bool "Disconnect the selected host after a long time without key presses"
+    depends on ZMK_BLE_ADV_TIMEOUT
+    help
+      After CONFIG_ZMK_BLE_IDLE_DISCONNECT_MIN minutes without a key press,
+      disconnect the selected host and pause advertising at once, so it can't
+      reconnect and wake the computer. A key press resumes advertising and
+      the host reconnects. Some hosts keep the link up while asleep; this lets
+      the keyboard drop to its paused drain overnight.
+
+config ZMK_BLE_IDLE_DISCONNECT_MIN
+    int "Minutes without a key press before the host is disconnected"
+    depends on ZMK_BLE_IDLE_DISCONNECT
+    default 20
+
+config ZMK_BLE_EVICT_ADV_COOLDOWN_MS
+    int "Delay before advertising again after another host disconnects (ms)"
+    depends on ZMK_BLE_ADV_TIMEOUT
+    default 0
+    range 0 5000
+    help
+      When a host other than the selected one disconnects and the selected
+      host is not connected, wait this long before advertising again. A value
+      above 0 also hides the keyboard from the selected host for that time. 0
+      advertises at once.
+
+config ZMK_BLE_PROFILE_HANDOFF
+    bool "Disconnect other hosts before advertising for a newly selected profile"
+    depends on ZMK_BLE_ADV_TIMEOUT
+    help
+      On a profile switch, disconnect every other connected host before
+      advertising for the selected one, so only the selected host stays
+      connected. A host whose address isn't resolved yet is waited for rather
+      than guessed. Skipped on USB power with
+      CONFIG_ZMK_BLE_HOST_ADV_OFF_ON_USB.
+
+config ZMK_BLE_PROFILE_HANDOFF_DISCONNECT_REASON
+    hex "HCI reason used to disconnect other hosts"
+    depends on ZMK_BLE_PROFILE_HANDOFF
+    default 0x13
+    help
+      0x13 is "remote user terminated". Some hosts reconnect more cleanly
+      after another reason, such as 0x15 (remote powered off).
+
+endmenu
+
 config BT_CTLR_PHY_2M
     default n if ZMK_BLE_EXPERIMENTAL_CONN
 
