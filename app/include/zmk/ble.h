@@ -40,6 +40,21 @@ bool zmk_ble_active_profile_is_open(void);
 bool zmk_ble_active_profile_is_connected(void);
 char *zmk_ble_active_profile_name(void);
 
+enum zmk_ble_adv_stage {
+    ZMK_BLE_ADV_STOP,
+    ZMK_BLE_ADV_PEER,
+    ZMK_BLE_ADV_CLEAR,
+    ZMK_BLE_ADV_ADD,
+    ZMK_BLE_ADV_START_OPEN,
+    ZMK_BLE_ADV_START_FILTERED,
+    ZMK_BLE_ADV_START_DIRECTED_RPA,
+    ZMK_BLE_ADV_START_DIRECTED,
+    ZMK_BLE_ADV_HANDOFF_DISCONNECT,
+};
+/* Weak hook called after each advertising HCI step; err is the unchanged Zephyr result.
+ * The default does nothing. */
+void zmk_ble_advertising_observed(uint8_t stage, int err);
+
 int zmk_ble_unpair_all(void);
 
 int zmk_ble_set_device_name(char *name);

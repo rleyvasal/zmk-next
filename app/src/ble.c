@@ -31,14 +31,16 @@
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include <zmk/ble.h>
+#if IS_ENABLED(CONFIG_ZMK_USB)
+#include <zmk/usb.h>
+#endif
+#if IS_ENABLED(CONFIG_ZMK_BLE_HOST_ADV_OFF_ON_USB)
+#include <zmk/events/usb_conn_state_changed.h>
+#endif
 #include <zmk/keys.h>
 #include <zmk/split/bluetooth/uuid.h>
 #include <zmk/event_manager.h>
 #include <zmk/events/ble_active_profile_changed.h>
-#if IS_ENABLED(CONFIG_ZMK_BLE_HOST_ADV_OFF_ON_USB)
-#include <zmk/usb.h>
-#include <zmk/events/usb_conn_state_changed.h>
-#endif
 
 #if IS_ENABLED(CONFIG_ZMK_BLE_PASSKEY_ENTRY)
 #include <zmk/events/keycode_state_changed.h>
@@ -59,12 +61,64 @@ enum advertising_type {
 
 #define CURR_ADV(adv) (adv << 4)
 
+#define ZMK_ADV_OPTS_BASE                                                                          \
+    (BT_LE_ADV_OPT_CONN | BT_LE_ADV_OPT_USE_NAME | BT_LE_ADV_OPT_FORCE_NAME_IN_AD)
+
 #define ZMK_ADV_CONN_NAME                                                                          \
-    BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONN | BT_LE_ADV_OPT_USE_NAME | BT_LE_ADV_OPT_FORCE_NAME_IN_AD,  \
-                    BT_GAP_ADV_FAST_INT_MIN_2, BT_GAP_ADV_FAST_INT_MAX_2, NULL)
+    BT_LE_ADV_PARAM(ZMK_ADV_OPTS_BASE, BT_GAP_ADV_FAST_INT_MIN_2, BT_GAP_ADV_FAST_INT_MAX_2, NULL)
 
 static struct zmk_ble_profile profiles[ZMK_BLE_PROFILE_COUNT];
 static uint8_t active_profile;
+
+/* Advertising runs on the system work queue only. Profile and USB changes bump the target
+ * version; a transaction whose target went stale stops and runs again for the new one.
+ * Profile writers only hold this lock for the RAM update, never for HCI. */
+static struct k_spinlock adv_target_lock;
+static uint32_t adv_target_version;
+static uint32_t advertising_target_version;
+struct adv_target {
+    uint32_t version;
+    uint8_t profile;
+    bt_addr_le_t peer;
+};
+
+static struct adv_target adv_target_snapshot(void) {
+    k_spinlock_key_t key = k_spin_lock(&adv_target_lock);
+    struct adv_target target = {
+        .version = adv_target_version,
+        .profile = active_profile,
+        .peer = profiles[active_profile].peer,
+    };
+    k_spin_unlock(&adv_target_lock, key);
+    return target;
+}
+
+static bool adv_target_is_current(const struct adv_target *target) {
+    k_spinlock_key_t key = k_spin_lock(&adv_target_lock);
+    bool current = target->version == adv_target_version;
+    k_spin_unlock(&adv_target_lock, key);
+#if IS_ENABLED(CONFIG_ZMK_BLE_HOST_ADV_OFF_ON_USB)
+    current = current && !zmk_usb_is_powered();
+#endif
+    return current;
+}
+
+enum adv_request {
+    ADV_LINK_COMPLETE,
+    ADV_RESTART,
+};
+static atomic_t adv_requests;
+static void update_advertising_callback(struct k_work *work);
+static K_WORK_DEFINE(update_advertising_work, update_advertising_callback);
+
+static bool advertising_worker(void) {
+    return k_current_get() == k_work_queue_thread_get(&k_sys_work_q);
+}
+
+static void request_advertising(enum adv_request request) {
+    atomic_set_bit(&adv_requests, request);
+    k_work_submit(&update_advertising_work);
+}
 
 #define DEVICE_NAME CONFIG_BT_DEVICE_NAME
 #define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
@@ -113,7 +167,10 @@ void set_profile_address(uint8_t index, const bt_addr_le_t *addr) {
 
     bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
 
+    k_spinlock_key_t key = k_spin_lock(&adv_target_lock);
     memcpy(&profiles[index].peer, addr, sizeof(bt_addr_le_t));
+    adv_target_version++;
+    k_spin_unlock(&adv_target_lock, key);
     sprintf(setting_name, "ble/profiles/%d", index);
     LOG_DBG("Setting profile addr for %s to %s", setting_name, addr_str);
 #if IS_ENABLED(CONFIG_SETTINGS)
@@ -124,6 +181,11 @@ void set_profile_address(uint8_t index, const bt_addr_le_t *addr) {
 
 bool zmk_ble_active_profile_is_connected(void) {
     return zmk_ble_profile_is_connected(active_profile);
+}
+
+__weak void zmk_ble_advertising_observed(uint8_t stage, int err) {
+    ARG_UNUSED(stage);
+    ARG_UNUSED(err);
 }
 
 static void profile_connected_foreach(struct bt_conn *conn, void *data) {
@@ -180,40 +242,117 @@ bool zmk_ble_profile_is_connected(uint8_t index) {
     return ctx.found;
 }
 
+/* All callers run on the system work queue. A profile/USB change while HCI
+ * sleeps invalidates the transaction; never keep advertising its old target. */
+static int start_advertising(const struct adv_target *target, const struct bt_le_adv_param *param,
+                             enum advertising_type type, uint8_t stage) {
+    if (!adv_target_is_current(target)) {
+        k_work_submit(&update_advertising_work);
+        return -EAGAIN;
+    }
+    int err = bt_le_adv_start(param, zmk_ble_ad, ARRAY_SIZE(zmk_ble_ad), NULL, 0);
+    zmk_ble_advertising_observed(stage, err);
+    if (!err) {
+        advertising_status = type;
+        advertising_target_version = target->version;
+        if (!adv_target_is_current(target)) {
+            err = bt_le_adv_stop();
+            zmk_ble_advertising_observed(ZMK_BLE_ADV_STOP, err);
+            if (!err) {
+                advertising_status = ZMK_ADV_NONE;
+            }
+            k_work_submit(&update_advertising_work);
+            return err ? err : -EAGAIN;
+        }
+    }
+    return err;
+}
+
 #define CHECKED_ADV_STOP()                                                                         \
     err = bt_le_adv_stop();                                                                        \
-    advertising_status = ZMK_ADV_NONE;                                                             \
+    zmk_ble_advertising_observed(ZMK_BLE_ADV_STOP, err);                                           \
     if (err) {                                                                                     \
         LOG_ERR("Failed to stop advertising (err %d)", err);                                       \
         return err;                                                                                \
-    }
+    }                                                                                              \
+    advertising_status = ZMK_ADV_NONE;
 
+/* Directed advertising to the active bonded peer. Used after profile switch to
+ * invite that host faster than undirected discovery (helps Windows especially).
+ * Privacy centrals (macOS): include DIR_ADDR_RPA so TargetA can be the peer's
+ * RPA. Failures fall through to open undirected (caller handles). */
 #define CHECKED_DIR_ADV()                                                                          \
-    addr = zmk_ble_active_profile_addr();                                                          \
-    conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, addr);                                            \
-    if (conn != NULL) { /* TODO: Check status of connection */                                     \
-        LOG_DBG("Skipping advertising, profile host is already connected");                        \
-        bt_conn_unref(conn);                                                                       \
-        return 0;                                                                                  \
-    }                                                                                              \
-    err = bt_le_adv_start(BT_LE_ADV_CONN_DIR_LOW_DUTY(addr), zmk_ble_ad, ARRAY_SIZE(zmk_ble_ad),   \
-                          NULL, 0);                                                                \
-    if (err) {                                                                                     \
-        LOG_ERR("Advertising failed to start (err %d)", err);                                      \
-        return err;                                                                                \
-    }                                                                                              \
-    advertising_status = ZMK_ADV_DIR;
+    do {                                                                                           \
+        addr = &target.peer;                                                                       \
+        if (addr == NULL || !bt_addr_le_cmp(addr, BT_ADDR_LE_ANY)) {                               \
+            err = -EINVAL;                                                                         \
+            break;                                                                                 \
+        }                                                                                          \
+        conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, addr);                                        \
+        if (conn != NULL) {                                                                        \
+            LOG_DBG("Skipping directed advertising, profile host already connected");              \
+            bt_conn_unref(conn);                                                                   \
+            err = 0;                                                                               \
+            break;                                                                                 \
+        }                                                                                          \
+        /* Low-duty directed can run longer than high-duty (~1.28s cap). Peer may be               \
+         * a privacy central — request RPA TargetA when the stack supports it. */                \
+        struct bt_le_adv_param dir_param = *BT_LE_ADV_CONN_DIR_LOW_DUTY(addr);                     \
+        dir_param.options |= BT_LE_ADV_OPT_DIR_ADDR_RPA;                                           \
+        err = start_advertising(&target, &dir_param, ZMK_ADV_DIR, ZMK_BLE_ADV_START_DIRECTED_RPA); \
+        if (err && err != -EAGAIN) {                                                               \
+            /* Retry without RPA option (some peers / stacks reject it). */                        \
+            dir_param = *BT_LE_ADV_CONN_DIR_LOW_DUTY(addr);                                        \
+            err = start_advertising(&target, &dir_param, ZMK_ADV_DIR, ZMK_BLE_ADV_START_DIRECTED); \
+        }                                                                                          \
+        if (err) {                                                                                 \
+            char addr_str[BT_ADDR_LE_STR_LEN];                                                     \
+            bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));                                   \
+            LOG_WRN("Directed advertising to %s failed (err %d)", addr_str, err);                  \
+            break;                                                                                 \
+        }                                                                                          \
+        advertising_status = ZMK_ADV_DIR;                                                          \
+        {                                                                                          \
+            char addr_str[BT_ADDR_LE_STR_LEN];                                                     \
+            bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));                                   \
+            LOG_INF("Directed advertising to %s (profile %d)", addr_str, active_profile);          \
+        }                                                                                          \
+    } while (0)
+
+int update_advertising(void);
 
 #define CHECKED_OPEN_ADV()                                                                         \
-    err = bt_le_adv_start(ZMK_ADV_CONN_NAME, zmk_ble_ad, ARRAY_SIZE(zmk_ble_ad), NULL, 0);         \
-    if (err) {                                                                                     \
-        LOG_ERR("Advertising failed to start (err %d)", err);                                      \
-        return err;                                                                                \
-    }                                                                                              \
-    advertising_status = ZMK_ADV_CONN;
+    do {                                                                                           \
+        err = start_advertising(&target, ZMK_ADV_CONN_NAME, ZMK_ADV_CONN, ZMK_BLE_ADV_START_OPEN); \
+        if (err == -EALREADY) {                                                                    \
+            advertising_status = ZMK_ADV_CONN;                                                     \
+            err = 0;                                                                               \
+        } else if (err == -EAGAIN) {                                                               \
+            /* The target changed; the queued run advertises for the new one. */                   \
+            err = 0;                                                                               \
+        } else if (err) {                                                                          \
+            LOG_ERR("Advertising failed to start (err %d)", err);                                  \
+            return err;                                                                            \
+        }                                                                                          \
+    } while (0)
 
 int update_advertising(void) {
+    if (!advertising_worker()) {
+        k_work_submit(&update_advertising_work);
+        return 0;
+    }
     int err = 0;
+    if (atomic_test_and_clear_bit(&adv_requests, ADV_LINK_COMPLETE)) {
+        advertising_status = ZMK_ADV_NONE;
+    }
+    if (atomic_test_bit(&adv_requests, ADV_RESTART)) {
+        CHECKED_ADV_STOP();
+        atomic_clear_bit(&adv_requests, ADV_RESTART);
+    }
+    struct adv_target target = adv_target_snapshot();
+    if (advertising_status != ZMK_ADV_NONE && advertising_target_version != target.version) {
+        CHECKED_ADV_STOP();
+    }
     bt_addr_le_t *addr;
     struct bt_conn *conn;
     enum advertising_type desired_adv = ZMK_ADV_NONE;
@@ -222,13 +361,6 @@ int update_advertising(void) {
         desired_adv = ZMK_ADV_CONN;
     } else if (!zmk_ble_active_profile_is_connected()) {
         desired_adv = ZMK_ADV_CONN;
-        // Need to fix directed advertising for privacy centrals. See
-        // https://github.com/zephyrproject-rtos/zephyr/pull/14984 char
-        // addr_str[BT_ADDR_LE_STR_LEN]; bt_addr_le_to_str(zmk_ble_active_profile_addr(), addr_str,
-        // sizeof(addr_str));
-
-        // LOG_DBG("Directed advertising to %s", addr_str);
-        // desired_adv = ZMK_ADV_DIR;
     }
 #if IS_ENABLED(CONFIG_ZMK_BLE_HOST_ADV_OFF_ON_USB)
     /* Host advertising only; the split link between halves is not affected. */
@@ -247,9 +379,16 @@ int update_advertising(void) {
     case ZMK_ADV_DIR + CURR_ADV(ZMK_ADV_CONN):
         CHECKED_ADV_STOP();
         CHECKED_DIR_ADV();
+        if (err && err != -EAGAIN && advertising_status == ZMK_ADV_NONE) {
+            /* Directed failed — fall back to open undirected immediately. */
+            CHECKED_OPEN_ADV();
+        }
         break;
     case ZMK_ADV_DIR + CURR_ADV(ZMK_ADV_NONE):
         CHECKED_DIR_ADV();
+        if (err && err != -EAGAIN && advertising_status == ZMK_ADV_NONE) {
+            CHECKED_OPEN_ADV();
+        }
         break;
     case ZMK_ADV_CONN + CURR_ADV(ZMK_ADV_DIR):
         CHECKED_ADV_STOP();
@@ -263,13 +402,17 @@ int update_advertising(void) {
     return 0;
 };
 
-static void update_advertising_callback(struct k_work *work) { update_advertising(); }
-
-K_WORK_DEFINE(update_advertising_work, update_advertising_callback);
+static void update_advertising_callback(struct k_work *work) {
+    ARG_UNUSED(work);
+    update_advertising();
+}
 
 #if IS_ENABLED(CONFIG_ZMK_BLE_HOST_ADV_OFF_ON_USB)
 static int usb_host_adv_listener(const zmk_event_t *eh) {
     ARG_UNUSED(eh);
+    k_spinlock_key_t key = k_spin_lock(&adv_target_lock);
+    adv_target_version++;
+    k_spin_unlock(&adv_target_lock, key);
     k_work_submit(&update_advertising_work);
     return ZMK_EV_EVENT_BUBBLE;
 }
@@ -313,6 +456,26 @@ int zmk_ble_profile_index(const bt_addr_le_t *addr) {
             return i;
         }
     }
+
+    /* macOS privacy: host may connect with an RPA while the profile stores the
+     * identity address. Do not use zephyr/bluetooth/keys.h (not public in our
+     * Zephyr). Instead: if a live connection is reachable by the stored
+     * identity and its current dst equals `addr`, it is this profile. */
+    for (int i = 0; i < ZMK_BLE_PROFILE_COUNT; i++) {
+        if (!bt_addr_le_cmp(&profiles[i].peer, BT_ADDR_LE_ANY)) {
+            continue;
+        }
+        struct bt_conn *conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &profiles[i].peer);
+        if (conn == NULL) {
+            continue;
+        }
+        const bt_addr_le_t *dst = bt_conn_get_dst(conn);
+        bool match = (dst != NULL && bt_addr_le_cmp(dst, addr) == 0);
+        bt_conn_unref(conn);
+        if (match) {
+            return i;
+        }
+    }
     return -ENODEV;
 }
 
@@ -349,11 +512,13 @@ int zmk_ble_prof_select(uint8_t index) {
         return 0;
     }
 
+    k_spinlock_key_t key = k_spin_lock(&adv_target_lock);
     active_profile = index;
+    adv_target_version++;
+    k_spin_unlock(&adv_target_lock, key);
     ble_save_profile();
 
     update_advertising();
-
     raise_profile_changed_event();
 
     return 0;
@@ -449,16 +614,8 @@ int zmk_ble_set_device_name(char *name) {
         LOG_ERR("Failed to set new device name (err %d)", err);
         return err;
     }
-    if (advertising_status == ZMK_ADV_CONN) {
-        // Stop current advertising so it can restart with new name
-        err = bt_le_adv_stop();
-        advertising_status = ZMK_ADV_NONE;
-        if (err) {
-            LOG_ERR("Failed to stop advertising (err %d)", err);
-            return err;
-        }
-    }
-    return update_advertising();
+    request_advertising(ADV_RESTART);
+    return 0;
 }
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
@@ -580,6 +737,12 @@ static struct settings_handler profiles_handler = {
 #endif /* IS_ENABLED(CONFIG_SETTINGS) */
 
 static bool is_conn_active_profile(const struct bt_conn *conn) {
+    /* Prefer IRK-aware profile index over raw address equality so macOS RPAs
+     * still count as the active profile once the bond can resolve them. */
+    int idx = zmk_ble_profile_index(bt_conn_get_dst(conn));
+    if (idx >= 0) {
+        return idx == active_profile;
+    }
     return bt_addr_le_cmp(bt_conn_get_dst(conn), &profiles[active_profile].peer) == 0;
 }
 
@@ -596,7 +759,7 @@ static void connected(struct bt_conn *conn, uint8_t err) {
     }
 
     bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-    advertising_status = ZMK_ADV_NONE;
+    request_advertising(ADV_LINK_COMPLETE);
 
     if (err) {
         LOG_WRN("Failed to connect to %s (%u)", addr, err);

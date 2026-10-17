@@ -36,6 +36,8 @@ jobs:
         run: python app/tests/split/idle_interval/test_idle_interval.py -v
       - name: Test passkey entry
         run: python app/tests/ble/passkey_entry/test_passkey_entry.py -v
-      - name: Test transport choice and advertising while cabled
+      - name: Test transport choice while cabled
         run: python app/tests/usb/cabled/test_cabled.py -v
+      - name: Test the BLE advertising worker
+        run: python app/tests/ble/advertising_worker/test_advertising_worker.py -v
       - uses: pre-commit/action@v3.0.1
