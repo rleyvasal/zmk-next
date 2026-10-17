@@ -122,6 +122,27 @@ bool zmk_ble_active_profile_is_connected(void) {
     return zmk_ble_profile_is_connected(active_profile);
 }
 
+static void profile_connected_foreach(struct bt_conn *conn, void *data) {
+    struct {
+        uint8_t index;
+        bool found;
+    } *ctx = data;
+    struct bt_conn_info info;
+
+    if (ctx->found) {
+        return;
+    }
+    if (bt_conn_get_info(conn, &info) != 0 || info.role != BT_CONN_ROLE_PERIPHERAL) {
+        return;
+    }
+    if (info.state != BT_CONN_STATE_CONNECTED) {
+        return;
+    }
+    if (zmk_ble_profile_index(bt_conn_get_dst(conn)) == ctx->index) {
+        ctx->found = true;
+    }
+}
+
 bool zmk_ble_profile_is_connected(uint8_t index) {
     if (index >= ZMK_BLE_PROFILE_COUNT) {
         return false;
@@ -131,15 +152,28 @@ bool zmk_ble_profile_is_connected(uint8_t index) {
     bt_addr_le_t *addr = &profiles[index].peer;
     if (!bt_addr_le_cmp(addr, BT_ADDR_LE_ANY)) {
         return false;
-    } else if ((conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, addr)) == NULL) {
-        return false;
+    } else if ((conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, addr)) != NULL) {
+        bool connected = bt_conn_get_info(conn, &info) == 0 &&
+                         info.role == BT_CONN_ROLE_PERIPHERAL &&
+                         info.state == BT_CONN_STATE_CONNECTED;
+        bt_conn_unref(conn);
+        if (connected) {
+            return true;
+        }
     }
 
-    bt_conn_get_info(conn, &info);
-
-    bt_conn_unref(conn);
-
-    return info.state == BT_CONN_STATE_CONNECTED;
+    /* RPA-safe fallback: any host conn whose resolved profile is this index.
+     *
+     * A lookup by the stored identity may briefly return an old, disconnected
+     * connection while the host's current RPA connection is already live. Do
+     * not return false for that stale object: doing so makes endpoint selection
+     * and reconnect recovery treat the active host as disconnected. */
+    struct {
+        uint8_t index;
+        bool found;
+    } ctx = {.index = index, .found = false};
+    bt_conn_foreach(BT_CONN_TYPE_LE, profile_connected_foreach, &ctx);
+    return ctx.found;
 }
 
 #define CHECKED_ADV_STOP()                                                                         \
@@ -338,6 +372,24 @@ int zmk_ble_prof_disconnect(uint8_t index) {
 
 bt_addr_le_t *zmk_ble_active_profile_addr(void) { return &profiles[active_profile].peer; }
 
+static void active_profile_conn_foreach(struct bt_conn *conn, void *data) {
+    struct bt_conn **out = data;
+    struct bt_conn_info info;
+
+    if (*out != NULL) {
+        return;
+    }
+    if (bt_conn_get_info(conn, &info) != 0 || info.role != BT_CONN_ROLE_PERIPHERAL) {
+        return;
+    }
+    if (info.state != BT_CONN_STATE_CONNECTED) {
+        return;
+    }
+    if (zmk_ble_profile_index(bt_conn_get_dst(conn)) == active_profile) {
+        *out = bt_conn_ref(conn);
+    }
+}
+
 struct bt_conn *zmk_ble_active_profile_conn(void) {
     struct bt_conn *conn;
     bt_addr_le_t *addr = zmk_ble_active_profile_addr();
@@ -345,11 +397,24 @@ struct bt_conn *zmk_ble_active_profile_conn(void) {
     if (!bt_addr_le_cmp(addr, BT_ADDR_LE_ANY)) {
         LOG_WRN("Not sending, no active address for current profile");
         return NULL;
-    } else if ((conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, addr)) == NULL) {
-        LOG_WRN("Not sending, not connected to active profile");
-        return NULL;
+    } else if ((conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, addr)) != NULL) {
+        struct bt_conn_info info;
+        bool connected = bt_conn_get_info(conn, &info) == 0 &&
+                         info.role == BT_CONN_ROLE_PERIPHERAL &&
+                         info.state == BT_CONN_STATE_CONNECTED;
+        if (connected) {
+            return conn;
+        }
+        bt_conn_unref(conn);
     }
 
+    /* Fallback: RPA / identity lag — find a live host conn that maps to the
+     * active profile via zmk_ble_profile_index (IRK-aware). */
+    conn = NULL;
+    bt_conn_foreach(BT_CONN_TYPE_LE, active_profile_conn_foreach, &conn);
+    if (conn == NULL) {
+        LOG_WRN("Not sending, not connected to active profile");
+    }
     return conn;
 }
 
