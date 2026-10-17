@@ -421,8 +421,9 @@ config ZMK_BATTERY_CHARGE_STATUS
       Publish the Battery Level Status characteristic (0x2BED) next to the
       battery level. Its charge state is "charging" while the half has VBUS
       (USB power) and "discharging" otherwise. A split central that fetches
-      peripheral battery levels also subscribes to the peripheral's status,
-      and zmk_split_central_get_peripheral_battery_charge_state() returns it.
+      peripheral battery levels also subscribes to the peripheral's status;
+      with CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_PROXY_SWAP it publishes
+      the peripheral's charge state to hosts.
       With a zmk,battery-charger status pin, a finished charge is published as
       "discharging, inactive" (on external power, not charging).
 

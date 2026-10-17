@@ -36,8 +36,11 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #endif
 #endif
 
-/* This half publishes its own level in the primary BAS. */
-#define OWN_BAS IS_ENABLED(CONFIG_BT_BAS)
+/* This half publishes its own level in the primary BAS. With the swapped proxy layout, a split
+ * central publishes it in the extra BAS instead (central_bas_proxy.c). */
+#define OWN_BAS                                                                                    \
+    (IS_ENABLED(CONFIG_BT_BAS) &&                                                                  \
+     !IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_PROXY_SWAP))
 
 /* Halves without ZMK_USB get no USB events, so poll VBUS detect for the charge state. */
 #if defined(NRF_POWER_HAS_USBREG) && NRF_POWER_HAS_USBREG && !IS_ENABLED(CONFIG_ZMK_USB) &&        \

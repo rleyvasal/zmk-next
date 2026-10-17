@@ -21,20 +21,21 @@ Following [split keyboard](../features/split-keyboards.md) settings are defined 
 
 Following bluetooth [split keyboard](../features/split-keyboards.md) settings are defined in [zmk/app/src/split/bluetooth/Kconfig](https://github.com/zmkfirmware/zmk/blob/main/app/src/split/bluetooth/Kconfig).
 
-| Config                                                  | Type | Description                                                                | Default                                    |
-| ------------------------------------------------------- | ---- | -------------------------------------------------------------------------- | ------------------------------------------ |
-| `CONFIG_ZMK_SPLIT_BLE`                                  | bool | Use BLE to communicate between split keyboard halves                       | y                                          |
-| `CONFIG_ZMK_SPLIT_BLE_CENTRAL_PERIPHERALS`              | int  | Number of peripherals that will connect to the central                     | 1                                          |
-| `CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING`   | bool | Enable fetching split peripheral battery levels to the central side        | n                                          |
-| `CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_PROXY`      | bool | Enable central reporting of split battery levels to hosts                  | n                                          |
-| `CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_RETAIN`     | bool | Keep a disconnected peripheral's last battery level instead of reporting 0 | n                                          |
-| `CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_QUEUE_SIZE` | int  | Max number of battery level events to queue when received from peripherals | `CONFIG_ZMK_SPLIT_BLE_CENTRAL_PERIPHERALS` |
-| `CONFIG_ZMK_SPLIT_BLE_CENTRAL_POSITION_QUEUE_SIZE`      | int  | Max number of key state events to queue when received from peripherals     | 5                                          |
-| `CONFIG_ZMK_SPLIT_BLE_CENTRAL_SPLIT_RUN_STACK_SIZE`     | int  | Stack size of the BLE split central write thread                           | 512                                        |
-| `CONFIG_ZMK_SPLIT_BLE_CENTRAL_SPLIT_RUN_QUEUE_SIZE`     | int  | Max number of behavior run events to queue to send to the peripheral(s)    | 5                                          |
-| `CONFIG_ZMK_SPLIT_BLE_PERIPHERAL_STACK_SIZE`            | int  | Stack size of the BLE split peripheral notify thread                       | 756                                        |
-| `CONFIG_ZMK_SPLIT_BLE_PERIPHERAL_PRIORITY`              | int  | Priority of the BLE split peripheral notify thread                         | 5                                          |
-| `CONFIG_ZMK_SPLIT_BLE_PERIPHERAL_POSITION_QUEUE_SIZE`   | int  | Max number of key state events to queue to send to the central             | 10                                         |
+| Config                                                  | Type | Description                                                                                                                              | Default                                    |
+| ------------------------------------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `CONFIG_ZMK_SPLIT_BLE`                                  | bool | Use BLE to communicate between split keyboard halves                                                                                     | y                                          |
+| `CONFIG_ZMK_SPLIT_BLE_CENTRAL_PERIPHERALS`              | int  | Number of peripherals that will connect to the central                                                                                   | 1                                          |
+| `CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING`   | bool | Enable fetching split peripheral battery levels to the central side                                                                      | n                                          |
+| `CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_PROXY`      | bool | Enable central reporting of split battery levels to hosts                                                                                | n                                          |
+| `CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_PROXY_SWAP` | bool | With one peripheral, report it in the primary Battery Service and the central in the additional one (for host apps such as Mighty Mitts) | n                                          |
+| `CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_RETAIN`     | bool | Keep a disconnected peripheral's last battery level instead of reporting 0                                                               | n                                          |
+| `CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_QUEUE_SIZE` | int  | Max number of battery level events to queue when received from peripherals                                                               | `CONFIG_ZMK_SPLIT_BLE_CENTRAL_PERIPHERALS` |
+| `CONFIG_ZMK_SPLIT_BLE_CENTRAL_POSITION_QUEUE_SIZE`      | int  | Max number of key state events to queue when received from peripherals                                                                   | 5                                          |
+| `CONFIG_ZMK_SPLIT_BLE_CENTRAL_SPLIT_RUN_STACK_SIZE`     | int  | Stack size of the BLE split central write thread                                                                                         | 512                                        |
+| `CONFIG_ZMK_SPLIT_BLE_CENTRAL_SPLIT_RUN_QUEUE_SIZE`     | int  | Max number of behavior run events to queue to send to the peripheral(s)                                                                  | 5                                          |
+| `CONFIG_ZMK_SPLIT_BLE_PERIPHERAL_STACK_SIZE`            | int  | Stack size of the BLE split peripheral notify thread                                                                                     | 756                                        |
+| `CONFIG_ZMK_SPLIT_BLE_PERIPHERAL_PRIORITY`              | int  | Priority of the BLE split peripheral notify thread                                                                                       | 5                                          |
+| `CONFIG_ZMK_SPLIT_BLE_PERIPHERAL_POSITION_QUEUE_SIZE`   | int  | Max number of key state events to queue to send to the central                                                                           | 10                                         |
 
 #### Input Split
 
