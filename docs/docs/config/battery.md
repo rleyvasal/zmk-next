@@ -11,10 +11,13 @@ See [Configuration Overview](index.md) for instructions on how to change these s
 
 Definition file: [zmk/app/Kconfig](https://github.com/zmkfirmware/zmk/blob/main/app/Kconfig)
 
-| Config                               | Type | Description                                            | Default |
-| ------------------------------------ | ---- | ------------------------------------------------------ | ------- |
-| `CONFIG_ZMK_BATTERY_REPORTING`       | bool | Enables/disables all battery level detection/reporting | n       |
-| `CONFIG_ZMK_BATTERY_REPORT_INTERVAL` | int  | Battery level report interval in seconds               | 60      |
+| Config                                       | Type | Description                                                                                                                                                                                                      | Default |
+| -------------------------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `CONFIG_ZMK_BATTERY_REPORTING`               | bool | Enables/disables all battery level detection/reporting                                                                                                                                                           | n       |
+| `CONFIG_ZMK_BATTERY_REPORT_INTERVAL`         | int  | Battery level report interval in seconds                                                                                                                                                                         | 60      |
+| `CONFIG_ZMK_BATTERY_HOLD_ON_EXTERNAL_POWER`  | bool | While on USB power, report the last level measured on battery (kept across restarts) instead of the charge-voltage reading. With a `zmk,battery-charger` node, also report charging, full and an estimated level | n       |
+| `CONFIG_ZMK_BATTERY_CHARGE_STATUS`           | bool | Publish the charge state in the BAS Battery Level Status characteristic (0x2BED). Selects `CONFIG_ZMK_BATTERY_HOLD_ON_EXTERNAL_POWER`                                                                            | n       |
+| `CONFIG_ZMK_BATTERY_SETTLE_AFTER_CHARGE_SEC` | int  | Keep the charged level for this long after USB power is removed, while the cell voltage settles                                                                                                                  | 0       |
 
 :::note[Default setting]
 
@@ -43,9 +46,12 @@ Host support for multiple battery levels is undefined. It appears that in most o
 
 Applies to: [`/chosen` node](https://docs.zephyrproject.org/4.1.0/build/dts/intro-syntax-structure.html#aliases-and-chosen-nodes)
 
-| Property      | Type | Description                                   |
-| ------------- | ---- | --------------------------------------------- |
-| `zmk,battery` | path | The node for the battery sensor driver to use |
+| Property              | Type | Description                                                                                              |
+| --------------------- | ---- | -------------------------------------------------------------------------------------------------------- |
+| `zmk,battery`         | path | The node for the battery sensor driver to use                                                            |
+| `zmk,battery-charger` | path | A `zmk,battery-charger` node describing the charger, used by `CONFIG_ZMK_BATTERY_HOLD_ON_EXTERNAL_POWER` |
+
+A `zmk,battery-charger` node can set `charge-current-microamp` and `charge-full-design-microamp-hours` to estimate the level rising while charging, and `status-gpios` to tell charging from full. The `xiao_ble` board defines one with its 50 mA charge current; a keyboard adds its battery's capacity. `status-gpios` support has not yet been verified on hardware.
 
 ## Battery Voltage Divider Sensor
 

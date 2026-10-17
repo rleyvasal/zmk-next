@@ -400,6 +400,51 @@ config ZMK_BATTERY_REPORTING_FETCH_MODE_LITHIUM_VOLTAGE
 
 endchoice
 
+config ZMK_BATTERY_HOLD_ON_EXTERNAL_POWER
+    bool "Report the remembered cell level while on external power"
+    help
+      While USB power is present the cell sits at charge voltage, so a voltage
+      reading says little about how full it is (lithium_ion_mv_to_pct reports
+      100% at 4.2 V). With this option the level reported to hosts and over the
+      split link is the last level measured on battery, kept in settings across
+      restarts, instead of the live reading. With a zmk,battery-charger node it
+      can do better: a status pin tells charging from full, and a charge current
+      plus battery capacity let it estimate the level rising while charging.
+      zmk_battery_state_of_charge() still returns the live reading.
+
+config ZMK_BATTERY_CHARGE_STATUS
+    bool "Report charging in the BAS Battery Level Status characteristic"
+    depends on BT_BAS
+    select BT_BAS_BLS
+    select ZMK_BATTERY_HOLD_ON_EXTERNAL_POWER
+    help
+      Publish the Battery Level Status characteristic (0x2BED) next to the
+      battery level. Its charge state is "charging" while the half has VBUS
+      (USB power) and "discharging" otherwise. A split central that fetches
+      peripheral battery levels also subscribes to the peripheral's status,
+      and zmk_split_central_get_peripheral_battery_charge_state() returns it.
+      With a zmk,battery-charger status pin, a finished charge is published as
+      "discharging, inactive" (on external power, not charging).
+
+config ZMK_BATTERY_CHARGE_STATE_API
+    def_bool y
+    help
+      Marks that zmk_battery_reported_soc() and zmk_battery_charge_state() exist,
+      so external modules can use them when built against this ZMK. Without
+      CONFIG_ZMK_BATTERY_HOLD_ON_EXTERNAL_POWER they return the live reading and
+      "discharging".
+
+config ZMK_BATTERY_SETTLE_AFTER_CHARGE_SEC
+    int "Seconds to keep the charged level after external power is removed"
+    depends on ZMK_BATTERY_HOLD_ON_EXTERNAL_POWER
+    default 0
+    help
+      Right after charging, the cell voltage is still raised and reads several
+      percent high for a few minutes. For this long after external power is
+      removed, keep reporting the level known at unplug (the last measured or
+      estimated level, or 100 when the charger finished) instead of the live
+      reading. 0 reports live readings straight away.
+
 endif # ZMK_BATTERY_REPORTING
 
 config ZMK_IDLE_TIMEOUT
@@ -656,7 +701,12 @@ if ZMK_LOW_PRIORITY_WORK_QUEUE
 
 config ZMK_LOW_PRIORITY_THREAD_STACK_SIZE
     int "Low priority thread stack size"
+    default 1536 if ZMK_BATTERY_HOLD_ON_EXTERNAL_POWER && SETTINGS
     default 768
+    help
+      With CONFIG_ZMK_BATTERY_HOLD_ON_EXTERNAL_POWER, battery persistence uses
+      this queue. Allow room for settings/NVS garbage collection and the
+      radio-aware flash driver.
 
 config ZMK_LOW_PRIORITY_THREAD_PRIORITY
     int "Low priority thread priority"

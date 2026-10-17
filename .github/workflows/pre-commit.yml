@@ -22,4 +22,14 @@ jobs:
         run: python app/tests/studio/uart_tx/test_uart_tx.py -v
       - name: Test Studio raw frames
         run: python app/tests/studio/raw_tx/test_raw_tx.py -v
+      - name: Test battery reporting with the hold option off
+        run: python app/tests/battery/hold_off/test_hold_off.py -v
+      - name: Test battery persistence during USB startup
+        run: python app/tests/battery/persistence/test_persistence.py -v
+      - name: Test battery cell level after booting on USB
+        run: python app/tests/battery/usb_boot/test_usb_boot.py -v
+      - name: Test peripheral charge state and level hold on USB
+        run: python app/tests/battery/charge_status/test_charge_status.py -v
+      - name: Test charge estimate, full and settling
+        run: python app/tests/battery/charge_tracking/test_charge_tracking.py -v
       - uses: pre-commit/action@v3.0.1

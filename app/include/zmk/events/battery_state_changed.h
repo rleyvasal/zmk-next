@@ -23,3 +23,12 @@ struct zmk_peripheral_battery_state_changed {
 };
 
 ZMK_EVENT_DECLARE(zmk_peripheral_battery_state_changed);
+
+struct zmk_peripheral_battery_charging_changed {
+    uint8_t source;
+    /* On external power: charging, or full when the charger reports it. */
+    bool charging;
+    bool full;
+};
+
+ZMK_EVENT_DECLARE(zmk_peripheral_battery_charging_changed);

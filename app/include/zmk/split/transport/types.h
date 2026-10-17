@@ -30,6 +30,7 @@ enum zmk_split_transport_peripheral_event_type {
     ZMK_SPLIT_TRANSPORT_PERIPHERAL_EVENT_TYPE_SENSOR_EVENT,
     ZMK_SPLIT_TRANSPORT_PERIPHERAL_EVENT_TYPE_INPUT_EVENT,
     ZMK_SPLIT_TRANSPORT_PERIPHERAL_EVENT_TYPE_BATTERY_EVENT,
+    ZMK_SPLIT_TRANSPORT_PERIPHERAL_EVENT_TYPE_BATTERY_CHARGING_EVENT,
 };
 
 struct zmk_split_transport_peripheral_event {
@@ -58,6 +59,11 @@ struct zmk_split_transport_peripheral_event {
         struct {
             uint8_t level;
         } battery_event;
+
+        struct {
+            /* enum zmk_battery_charge_state: 0 discharging, 1 charging, 2 full */
+            uint8_t charging;
+        } battery_charging_event;
     } data;
 } __packed;
 
