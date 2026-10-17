@@ -40,4 +40,9 @@ jobs:
         run: python app/tests/usb/cabled/test_cabled.py -v
       - name: Test the BLE advertising worker
         run: python app/tests/ble/advertising_worker/test_advertising_worker.py -v
+      - name: Test multi-host advertising and profile handoff
+        run: |
+          python app/tests/ble/advertising_owner/test_advertising_owner.py -v
+          python app/tests/ble/profile_notifications/test_profile_notifications.py -v
+          python app/tests/ble/keyboard_ccc/test_keyboard_ccc.py -v
       - uses: pre-commit/action@v3.0.1
