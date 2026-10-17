@@ -34,6 +34,10 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/pointing/input_split.h>
 #include <zmk/hid_indicators_types.h>
 #include <zmk/physical_layouts.h>
+#if CONFIG_ZMK_SPLIT_BLE_IDLE_INT > 0
+#include <zmk/activity.h>
+#include <zmk/events/activity_state_changed.h>
+#endif
 
 static int start_scanning(void);
 
@@ -1043,6 +1047,63 @@ static int start_scanning(void) {
     return 0;
 }
 
+#if CONFIG_ZMK_SPLIT_BLE_IDLE_INT > 0
+
+struct split_conn_params {
+    uint16_t interval;
+    uint16_t latency;
+    uint16_t timeout;
+};
+
+/* The fast interval while typing, the idle one otherwise. The supervision
+ * timeout (10 ms units) must exceed (1 + latency) * interval * 2 (1.25 ms
+ * units); lower the latency rather than lengthen the timeout, which bounds how
+ * long a dead split link goes unnoticed. */
+static struct split_conn_params split_conn_params_for(bool idle) {
+    struct split_conn_params p = {
+        .interval = idle ? CONFIG_ZMK_SPLIT_BLE_IDLE_INT : CONFIG_ZMK_SPLIT_BLE_PREF_INT,
+        .latency = idle ? CONFIG_ZMK_SPLIT_BLE_IDLE_LATENCY : CONFIG_ZMK_SPLIT_BLE_PREF_LATENCY,
+        .timeout = CONFIG_ZMK_SPLIT_BLE_PREF_TIMEOUT,
+    };
+
+    while (p.latency > 0 &&
+           (uint32_t)(1 + p.latency) * p.interval * 250 >= (uint32_t)p.timeout * 1000) {
+        p.latency--;
+    }
+    return p;
+}
+
+static bool split_idle;
+
+static void split_apply_conn_params(struct k_work *work) {
+    ARG_UNUSED(work);
+    struct split_conn_params p = split_conn_params_for(split_idle);
+    struct bt_le_conn_param param =
+        BT_LE_CONN_PARAM_INIT(p.interval, p.interval, p.latency, p.timeout);
+
+    for (int i = 0; i < ZMK_SPLIT_BLE_PERIPHERAL_COUNT; i++) {
+        if (peripherals[i].state != PERIPHERAL_SLOT_STATE_CONNECTED || !peripherals[i].conn) {
+            continue;
+        }
+        int err = bt_conn_le_param_update(peripherals[i].conn, &param);
+        if (err < 0 && err != -EALREADY) {
+            LOG_WRN("Split interval update to %u failed (err %d)", p.interval, err);
+        }
+    }
+}
+
+static K_WORK_DEFINE(split_conn_params_work, split_apply_conn_params);
+
+static void split_set_idle(bool idle) {
+    if (idle == split_idle) {
+        return;
+    }
+    split_idle = idle;
+    k_work_submit(&split_conn_params_work);
+}
+
+#endif // CONFIG_ZMK_SPLIT_BLE_IDLE_INT > 0
+
 static void split_central_connected(struct bt_conn *conn, uint8_t conn_err) {
     char addr[BT_ADDR_LE_STR_LEN];
     struct bt_conn_info info;
@@ -1070,6 +1131,12 @@ static void split_central_connected(struct bt_conn *conn, uint8_t conn_err) {
     confirm_peripheral_slot_conn(conn);
     split_central_process_connection(conn);
     k_work_submit(&notify_status_work);
+#if CONFIG_ZMK_SPLIT_BLE_IDLE_INT > 0
+    if (split_idle) {
+        /* Connections are created at the fast interval. */
+        k_work_submit(&split_conn_params_work);
+    }
+#endif
 }
 
 static void split_central_disconnected(struct bt_conn *conn, uint8_t reason) {
@@ -1286,11 +1353,19 @@ static int zmk_split_bt_central_listener_cb(const zmk_event_t *eh) {
     if (as_zmk_physical_layout_selection_changed(eh)) {
         k_work_submit(&update_peripherals_selected_layouts_work);
     }
+#if CONFIG_ZMK_SPLIT_BLE_IDLE_INT > 0
+    if (as_zmk_activity_state_changed(eh)) {
+        split_set_idle(zmk_activity_get_state() != ZMK_ACTIVITY_ACTIVE);
+    }
+#endif
     return ZMK_EV_EVENT_BUBBLE;
 }
 
 ZMK_LISTENER(zmk_split_bt_central, zmk_split_bt_central_listener_cb);
 ZMK_SUBSCRIPTION(zmk_split_bt_central, zmk_physical_layout_selection_changed);
+#if CONFIG_ZMK_SPLIT_BLE_IDLE_INT > 0
+ZMK_SUBSCRIPTION(zmk_split_bt_central, zmk_activity_state_changed);
+#endif
 
 static int split_central_bt_send_command(uint8_t source,
                                          struct zmk_split_transport_central_command cmd) {

@@ -95,6 +95,38 @@ config ZMK_SPLIT_BLE_PREF_TIMEOUT
     int "Supervision timeout to use for split central/peripheral connection"
     default 400
 
+config ZMK_SPLIT_BLE_IDLE_INT
+    int "Connection interval for the split connection while the keyboard is idle"
+    default 0
+    help
+      Interval (in 1.25 ms units) to switch the split connections to when the
+      keyboard goes idle (CONFIG_ZMK_IDLE_TIMEOUT). The central sends on every
+      connection event, so a slower interval while nothing is typed saves most
+      of its split radio power. The first key press switches back to
+      CONFIG_ZMK_SPLIT_BLE_PREF_INT; until that takes effect (a few idle
+      intervals), keys from the peripheral arrive at the idle interval.
+      If the latency would not fit the supervision timeout at this interval,
+      the latency is lowered. 0 keeps CONFIG_ZMK_SPLIT_BLE_PREF_INT always.
+
+config ZMK_SPLIT_BLE_IDLE_LATENCY
+    int "Peripheral latency for the split connection while the keyboard is idle"
+    depends on ZMK_SPLIT_BLE_IDLE_INT > 0
+    default ZMK_SPLIT_BLE_PREF_LATENCY
+    help
+      Connection events the peripheral may sleep through at the idle interval.
+      A long sleep before the switch back to the fast interval can lose the
+      link (seen with the Zephyr controller at 60 ms and latency 30: the link
+      dropped right after most switches back). A small value keeps the
+      peripheral listening often enough while still saving the central's power,
+      which does not depend on the latency.
+
+      Switching back from the idle interval has dropped the split link about
+      a second later with Zephyr's controller in ZMK's Zephyr v4.1.0
+      (zmkfirmware/zephyr v4.1.0+zmk-fixes): it does not restart the
+      supervision countdown at the connection update instant. The fix is on
+      rleyvasal/zephyr v4.1.0+zmk-fixes+supervision-reset (ae038c05); use it
+      until it is upstream.
+
 endif # ZMK_SPLIT_ROLE_CENTRAL
 
 if !ZMK_SPLIT_ROLE_CENTRAL
