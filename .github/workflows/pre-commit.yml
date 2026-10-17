@@ -12,6 +12,14 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: 3.x
+      - name: Test the BLE profile connection checks
+        run: |
+          python app/tests/ble/profile_connected/test_profile_connected.py -v
+          python app/tests/ble/active_connection/test_active_connection.py -v
+      - name: Test the post-settings startup hook
+        run: python app/tests/settings/startup/test_settings_loaded.py -v
+      - name: Test the Studio UART TX path
+        run: python app/tests/studio/uart_tx/test_uart_tx.py -v
       - name: Test Studio raw frames
         run: python app/tests/studio/raw_tx/test_raw_tx.py -v
       - uses: pre-commit/action@v3.0.1

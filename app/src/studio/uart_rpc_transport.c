@@ -141,12 +141,22 @@ static void serial_cb(const struct device *dev, void *user_data) {
             uint32_t claim_len = ring_buf_get_claim(tx_buf, &buf, tx_buf->size);
 
             if (claim_len == 0) {
-                continue;
+                break;
             }
 
             int sent = uart_fifo_fill(uart_dev, buf, claim_len);
 
-            ring_buf_get_finish(tx_buf, MAX(sent, 0));
+            if (sent <= 0) {
+                /* The host isn't draining the port; retry on the next TX-ready interrupt. */
+                ring_buf_get_finish(tx_buf, 0);
+                break;
+            }
+
+            ring_buf_get_finish(tx_buf, sent);
+        }
+
+        if (ring_buf_is_empty(tx_buf)) {
+            uart_irq_tx_disable(uart_dev);
         }
     }
 }

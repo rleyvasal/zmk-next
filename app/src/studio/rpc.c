@@ -374,6 +374,10 @@ static void refresh_selected_transport(void) {
     k_mutex_lock(&rpc_transport_mutex, K_FOREVER);
 
     if (selected_transport && selected_transport->transport == transport) {
+        /* USB CDC IRQs enabled before configuration are a no-op. Re-arm. */
+        if (selected_transport->rx_start) {
+            selected_transport->rx_start();
+        }
         goto exit_refresh;
     }
 
