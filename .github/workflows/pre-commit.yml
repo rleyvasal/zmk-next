@@ -32,4 +32,6 @@ jobs:
         run: python app/tests/battery/charge_status/test_charge_status.py -v
       - name: Test charge estimate, full and settling
         run: python app/tests/battery/charge_tracking/test_charge_tracking.py -v
+      - name: Test the idle split interval
+        run: python app/tests/split/idle_interval/test_idle_interval.py -v
       - uses: pre-commit/action@v3.0.1
