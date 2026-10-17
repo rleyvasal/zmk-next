@@ -157,6 +157,27 @@ config USB_NUMOF_EP_WRITE_RETRIES
 config USB_HID_POLL_INTERVAL_MS
     default 1
 
+config ZMK_USB_NO_BLE_FALLBACK_WHEN_POWERED
+    bool "Don't fall back to BLE while USB power is present"
+    depends on ZMK_BLE
+    help
+      When USB output is preferred and USB power is present but USB HID is not
+      ready yet, send keys nowhere instead of falling back to BLE. macOS drops
+      the BLE keyboard when the same keyboard appears on USB, so the BLE
+      fallback types nothing there while the cable is in.
+      With this option, a keyboard charging from a power bank or a charge-only
+      cable types over BLE only after selecting it with &out OUT_BLE.
+
+config ZMK_BLE_HOST_ADV_OFF_ON_USB
+    bool "Don't advertise to hosts while USB power is present"
+    depends on ZMK_BLE
+    help
+      Stop advertising to hosts while USB power is present, and start again when
+      it is removed. A host that is already connected stays connected. On nRF52,
+      USB HID and host BLE connection events share the radio scheduler. With USB
+      HID active, this keeps a host from connecting over BLE at the same time.
+      The connection between split halves is not affected.
+
 endif # ZMK_USB
 
 menuconfig ZMK_BLE

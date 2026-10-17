@@ -35,6 +35,10 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/split/bluetooth/uuid.h>
 #include <zmk/event_manager.h>
 #include <zmk/events/ble_active_profile_changed.h>
+#if IS_ENABLED(CONFIG_ZMK_BLE_HOST_ADV_OFF_ON_USB)
+#include <zmk/usb.h>
+#include <zmk/events/usb_conn_state_changed.h>
+#endif
 
 #if IS_ENABLED(CONFIG_ZMK_BLE_PASSKEY_ENTRY)
 #include <zmk/events/keycode_state_changed.h>
@@ -226,6 +230,12 @@ int update_advertising(void) {
         // LOG_DBG("Directed advertising to %s", addr_str);
         // desired_adv = ZMK_ADV_DIR;
     }
+#if IS_ENABLED(CONFIG_ZMK_BLE_HOST_ADV_OFF_ON_USB)
+    /* Host advertising only; the split link between halves is not affected. */
+    if (zmk_usb_is_powered()) {
+        desired_adv = ZMK_ADV_NONE;
+    }
+#endif
     LOG_DBG("advertising from %d to %d", advertising_status, desired_adv);
 
     switch (desired_adv + CURR_ADV(advertising_status)) {
@@ -256,6 +266,17 @@ int update_advertising(void) {
 static void update_advertising_callback(struct k_work *work) { update_advertising(); }
 
 K_WORK_DEFINE(update_advertising_work, update_advertising_callback);
+
+#if IS_ENABLED(CONFIG_ZMK_BLE_HOST_ADV_OFF_ON_USB)
+static int usb_host_adv_listener(const zmk_event_t *eh) {
+    ARG_UNUSED(eh);
+    k_work_submit(&update_advertising_work);
+    return ZMK_EV_EVENT_BUBBLE;
+}
+
+ZMK_LISTENER(zmk_ble_usb_host_adv, usb_host_adv_listener);
+ZMK_SUBSCRIPTION(zmk_ble_usb_host_adv, zmk_usb_conn_state_changed);
+#endif
 
 static void clear_profile_bond(uint8_t profile) {
     if (bt_addr_le_cmp(&profiles[profile].peer, BT_ADDR_LE_ANY)) {

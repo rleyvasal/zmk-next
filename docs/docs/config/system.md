@@ -75,16 +75,18 @@ Exactly zero or one of the following options may be set to `y`. The first is use
 
 ### USB
 
-| Config                            | Type   | Description                             | Default         |
-| --------------------------------- | ------ | --------------------------------------- | --------------- |
-| `CONFIG_USB`                      | bool   | Enable USB drivers                      |                 |
-| `CONFIG_USB_DEVICE_VID`           | int    | The vendor ID advertised to USB         | `0x1D50`        |
-| `CONFIG_USB_DEVICE_PID`           | int    | The product ID advertised to USB        | `0x615E`        |
-| `CONFIG_USB_DEVICE_MANUFACTURER`  | string | The manufacturer name advertised to USB | `"ZMK Project"` |
-| `CONFIG_USB_HID_POLL_INTERVAL_MS` | int    | USB polling interval in milliseconds    | 1               |
-| `CONFIG_ZMK_USB`                  | bool   | Enable ZMK as a USB keyboard            |                 |
-| `CONFIG_ZMK_USB_BOOT`             | bool   | Enable USB Boot protocol support        | n               |
-| `CONFIG_ZMK_USB_INIT_PRIORITY`    | int    | USB init priority                       | 50              |
+| Config                                        | Type   | Description                                                                                      | Default         |
+| --------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------ | --------------- |
+| `CONFIG_USB`                                  | bool   | Enable USB drivers                                                                               |                 |
+| `CONFIG_USB_DEVICE_VID`                       | int    | The vendor ID advertised to USB                                                                  | `0x1D50`        |
+| `CONFIG_USB_DEVICE_PID`                       | int    | The product ID advertised to USB                                                                 | `0x615E`        |
+| `CONFIG_USB_DEVICE_MANUFACTURER`              | string | The manufacturer name advertised to USB                                                          | `"ZMK Project"` |
+| `CONFIG_USB_HID_POLL_INTERVAL_MS`             | int    | USB polling interval in milliseconds                                                             | 1               |
+| `CONFIG_ZMK_USB`                              | bool   | Enable ZMK as a USB keyboard                                                                     |                 |
+| `CONFIG_ZMK_USB_BOOT`                         | bool   | Enable USB Boot protocol support                                                                 | n               |
+| `CONFIG_ZMK_USB_NO_BLE_FALLBACK_WHEN_POWERED` | bool   | With USB output preferred and USB power present, wait for USB HID instead of falling back to BLE | n               |
+| `CONFIG_ZMK_BLE_HOST_ADV_OFF_ON_USB`          | bool   | Don't advertise to hosts while USB power is present                                              | n               |
+| `CONFIG_ZMK_USB_INIT_PRIORITY`                | int    | USB init priority                                                                                | 50              |
 
 :::note[USB Boot protocol support]
 
