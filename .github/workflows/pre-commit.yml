@@ -24,6 +24,8 @@ jobs:
         run: python app/tests/studio/raw_tx/test_raw_tx.py -v
       - name: Test battery reporting with the hold option off
         run: python app/tests/battery/hold_off/test_hold_off.py -v
+      - name: Test the battery voltage in both fetch modes
+        run: python app/tests/battery/millivolts/test_millivolts.py -v
       - name: Test battery persistence during USB startup
         run: python app/tests/battery/persistence/test_persistence.py -v
       - name: Test battery cell level after booting on USB

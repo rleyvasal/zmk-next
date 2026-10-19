@@ -322,6 +322,14 @@ static int zmk_battery_update(const struct device *battery) {
         LOG_DBG("Failed to get battery state of charge: %d", rc);
         return rc;
     }
+
+    /* Gauges that also measure the voltage (ZMK's voltage-divider and nRF VDDH drivers) keep it
+     * from the same fetch: record it for zmk_battery_millivolts(). Others leave it at 0. */
+    struct sensor_value voltage;
+
+    if (sensor_channel_get(battery, SENSOR_CHAN_GAUGE_VOLTAGE, &voltage) == 0) {
+        last_millivolts = voltage.val1 * 1000 + (voltage.val2 / 1000);
+    }
 #elif IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING_FETCH_MODE_LITHIUM_VOLTAGE)
     rc = sensor_sample_fetch_chan(battery, SENSOR_CHAN_VOLTAGE);
     if (rc != 0) {
