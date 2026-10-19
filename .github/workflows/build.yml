@@ -20,7 +20,10 @@ permissions: {}
 
 jobs:
   build:
-    if: ${{ always() }}
+    # A scheduled run in a fork has nothing to build: get-changed-files is skipped on
+    # schedule and nightly only runs in zmkfirmware/zmk, so the matrix is empty, and an
+    # empty matrix fails the run. Skip the job then.
+    if: ${{ always() && needs.compile-matrix.outputs.include-list != '[]' && needs.compile-matrix.outputs.include-list != '' }}
     runs-on: ubuntu-latest
     container:
       image: docker.io/zmkfirmware/zmk-build-arm:4.1
