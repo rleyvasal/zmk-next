@@ -24,7 +24,7 @@ manifest:
     - name: zmk
       remote: zmk-next
       repo-path: zmk-next
-      revision: v0.2.0
+      revision: v0.2.2
       import: app/west.yml
   self:
     path: config
@@ -110,6 +110,45 @@ Serial connection used by **Connect**.
 After connecting, make a small key change and confirm that it types immediately.
 Use **Restore stock configuration** to remove the runtime overlay and return to
 the compiled keymap.
+
+## 5. Optional: keyboard log and battery levels
+
+The configurator can also show the keyboard's log and both halves' battery
+levels over the same USB connection. These come from the
+[zmk-studio-log](https://github.com/rleyvasal/zmk-studio-log) module and need
+configurator v0.2.1 or later.
+
+Add the module to `config/west.yml`, next to the `zmk` entry from step 1:
+
+```yaml
+- name: zmk-studio-log
+  remote: zmk-next
+  revision: v0.1.0
+```
+
+Then turn it on in `config/<keyboard>.conf`:
+
+```ini
+CONFIG_ZMK_STUDIO_LOG=y
+
+# Battery levels for the header chips
+CONFIG_ZMK_BATTERY_HOLD_ON_EXTERNAL_POWER=y
+# Split keyboards: also show the peripheral half's level
+CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING=y
+```
+
+Rebuild and flash, connect, then click **Enable log** in the keyboard log
+panel. The battery chips fill in within about 10 seconds.
+
+- `CONFIG_ZMK_BATTERY_HOLD_ON_EXTERNAL_POWER` keeps the last level measured
+  on battery while USB is plugged in. On USB the cell sits at charge voltage
+  and would otherwise always read about 100%.
+- The module only streams over USB, so a keyboard on Bluetooth sends nothing.
+- On a split, the peripheral half's build warns that `CONFIG_ZMK_STUDIO_LOG`
+  and the fetching option were not applied. That is expected: only the central
+  half uses them.
+- For tracking down unexpected restarts, the module also has restart
+  diagnostics and a flash-backed black box. See its README.
 
 ## Updating later
 
