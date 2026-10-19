@@ -36,5 +36,7 @@ uint8_t zmk_battery_reported_soc(void);
  * CONFIG_ZMK_BATTERY_HOLD_ON_EXTERNAL_POWER. */
 enum zmk_battery_charge_state zmk_battery_charge_state(void);
 
-/* Last ADC millivolts (0 if not sampled yet). USB charge is typically >= 4200. */
+/* Last measured battery voltage in millivolts: from the voltage fetch in LITHIUM_VOLTAGE mode, or
+ * the gauge's voltage channel in STATE_OF_CHARGE mode. 0 if not sampled yet or the gauge has no
+ * voltage channel. USB charge is typically >= 4200. */
 uint16_t zmk_battery_millivolts(void);

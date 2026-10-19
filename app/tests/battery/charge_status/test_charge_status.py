@@ -54,13 +54,19 @@ static bool nrf_power_usbregstatus_vbusdet_get(NRF_POWER_Type const *p_reg) {
 }
 struct device { int unused; };
 struct sensor_value { int val1, val2; };
-enum { SENSOR_CHAN_GAUGE_STATE_OF_CHARGE };
+enum { SENSOR_CHAN_GAUGE_STATE_OF_CHARGE, SENSOR_CHAN_GAUGE_VOLTAGE };
 static int sampled_soc;
+static uint16_t last_millivolts;
 static int sensor_sample_fetch_chan(const struct device *dev, int chan) {
     (void)dev; assert(chan == SENSOR_CHAN_GAUGE_STATE_OF_CHARGE); return 0;
 }
+/* A gauge with no voltage channel: battery.c then leaves last_millivolts at 0. */
 static int sensor_channel_get(const struct device *dev, int chan, struct sensor_value *val) {
-    (void)dev; assert(chan == SENSOR_CHAN_GAUGE_STATE_OF_CHARGE);
+    (void)dev;
+    if (chan == SENSOR_CHAN_GAUGE_VOLTAGE) {
+        return -ENOTSUP;
+    }
+    assert(chan == SENSOR_CHAN_GAUGE_STATE_OF_CHARGE);
     val->val1 = sampled_soc; val->val2 = 0; return 0;
 }
 struct zmk_battery_state_changed { uint8_t state_of_charge; };
