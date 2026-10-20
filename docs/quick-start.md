@@ -70,8 +70,12 @@ once:
   already prepared for ZMK Studio have one.
 - Studio is locked by default. Keep your existing `&studio_unlock` key/combo,
   or temporarily add `-DCONFIG_ZMK_STUDIO_LOCKING=n` while evaluating ZMK Next.
-- The `zmk-next` snippet uses the same USB serial setup as upstream's
-  `studio-rpc-usb-uart` and works for most boards. A board with a custom or
+  Don't wrap the unlock key in `#ifdef CONFIG_ZMK_STUDIO`: the snippet turns
+  Studio on in Kconfig, which the keymap can't see, so the key would be left
+  out and Studio would stay locked.
+- The `zmk-next` snippet puts Studio on the board's USB serial port, so the
+  keyboard shows up as one serial port, also on boards such as the Seeed XIAO
+  BLE that already have one. It turns off the UART console on that port. A board with a custom or
   conflicting USB CDC setup can instead keep its own Studio RPC snippet and add
   `cmake-args: -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_RUNTIME_CONFIG=y`.
 
