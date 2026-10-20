@@ -1,9 +1,12 @@
-name: Minor release tag
+name: Release line
 
-# Moves the minor tag (v0.2) to each patch release (v0.2.3) published by hand,
-# so configs that pin the minor tag get it on their next build. The weekly
-# upstream sync moves the tag itself: releases it creates with GITHUB_TOKEN
-# don't start other workflows.
+# Moves the release line (the v0.2-branch branch and the v0.2 tag) to each
+# patch release (v0.2.3) published by hand, so configs that pin the release
+# line get it on their next build. Configs pin the branch: west skips fetching
+# a tag it already has, so builds that restore a cached west workspace (ZMK's
+# build-user-config.yml) never see a moved tag. The tag is kept for configs
+# that pinned it earlier. The weekly upstream sync moves both itself: releases
+# it creates with GITHUB_TOKEN don't start other workflows.
 
 on:
   release:
@@ -20,7 +23,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Move the minor tag
+      - name: Move the release line
         env:
           TAG: ${{ github.event.release.tag_name }}
         run: |
@@ -34,6 +37,9 @@ jobs:
             echo "$TAG is older than $latest; leaving $minor alone."
             exit 0
           fi
+          # Branch first, fast-forward only: a release line never rewinds, and
+          # a rejected push leaves the tag alone too.
+          git push origin "$(git rev-parse "$TAG^{commit}"):refs/heads/${minor}-branch"
           git tag -f "$minor" "$TAG^{commit}"
           git push -f origin "refs/tags/$minor"
           echo "$minor -> $TAG"
