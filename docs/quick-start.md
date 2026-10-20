@@ -6,7 +6,7 @@ workflow. The firmware exposes supported keymap changes to the local ZMK Next
 Configurator over ZMK Studio's USB serial connection.
 
 Adding ZMK Next takes two edits: one in `config/west.yml` and one in
-`build.yaml`. The guide pins the `v0.2` release line: each rebuild picks up the
+`build.yaml`. The guide pins the `v0.2-branch` release line: each rebuild picks up the
 latest v0.2.x fixes, and nothing that changes the configurator protocol arrives
 until you change the pin. Use a configurator release with the same major and
 minor version (any v0.2.x configurator works with any v0.2.x firmware).
@@ -25,7 +25,7 @@ manifest:
     - name: zmk
       remote: zmk-next
       repo-path: zmk-next
-      revision: v0.2
+      revision: v0.2-branch
       import: app/west.yml
   self:
     path: config
@@ -130,7 +130,7 @@ Add the module to `config/west.yml`, next to the `zmk` entry from step 1:
 ```yaml
 - name: zmk-studio-log
   remote: zmk-next
-  revision: v0.1
+  revision: v0.1-branch
 ```
 
 Then turn it on in `config/<keyboard>.conf`:
@@ -160,14 +160,19 @@ panel. The battery chips fill in within about 10 seconds.
 ## Updating later
 
 ZMK Next merges upstream ZMK every week and tags a patch release (for example
-v0.2.4) when the merge passes its tests, then moves the `v0.2` tag to it. A
-config pinned to `v0.2` gets it on its next build; rebuild and flash to update.
-zmk-studio-log's `v0.1` works the same way. Patch releases never change the
-configurator protocol.
+v0.2.4) when the merge passes its tests, then moves the `v0.2-branch` branch to
+it. A config pinned to `v0.2-branch` gets it on its next build; rebuild and
+flash to update. zmk-studio-log's `v0.1-branch` works the same way. Patch
+releases never change the configurator protocol.
+
+Pin the branch, not the `v0.2` tag. The tag moves too, but west does not fetch
+a tag it already has, and GitHub Actions builds reuse a cached west workspace
+until `west.yml` changes. A config pinned to `v0.2` stays on the release it
+first built with; change it to `v0.2-branch` (and `v0.1` to `v0.1-branch`).
 
 A new minor version (v0.3) can change the protocol and needs a matching
-configurator release, so moving to it is a deliberate edit: change `v0.2` to
-`v0.3` and download the v0.3 configurator.
+configurator release, so moving to it is a deliberate edit: change
+`v0.2-branch` to `v0.3-branch` and download the v0.3 configurator.
 
 For builds that never change, pin an exact release (`v0.2.3`) instead and update
 it by hand. Rolling back is pinning the previous release and rebuilding.

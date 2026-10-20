@@ -2,7 +2,8 @@ name: Upstream sync
 
 # Weekly: merge zmkfirmware/zmk main into this fork, run the Runtime Config
 # tests and the documented two-edit build, then fast-forward main and tag the
-# next patch release (v0.2.0 -> v0.2.1), and move the minor tag (v0.2) to it.
+# next patch release (v0.2.0 -> v0.2.1), and move the release line (the
+# v0.2-branch branch and the v0.2 tag) to it.
 # A conflict or a failing check leaves the merge on the upstream-sync branch
 # and opens an issue instead.
 #
@@ -127,7 +128,10 @@ jobs:
           next="v${major}.${minor}.$((patch + 1))"
           git tag "$next" "$SHA"
           git push origin "$next"
-          # Configs that pin the minor tag get every patch release.
+          # Configs that pin the release line get every patch release. They pin
+          # the branch, which west fetches even in a cached workspace; the tag
+          # stays for configs that pinned it earlier.
+          git push origin "$SHA:refs/heads/v${major}.${minor}-branch"
           git tag -f "v${major}.${minor}" "$SHA"
           git push -f origin "refs/tags/v${major}.${minor}"
 
