@@ -24,7 +24,7 @@ manifest:
     - name: zmk
       remote: zmk-next
       repo-path: zmk-next
-      revision: v0.2.2
+      revision: v0.2.3
       import: app/west.yml
   self:
     path: config
@@ -109,7 +109,9 @@ extract it, then launch:
 Python 3 is the only local requirement. The launcher serves the app on
 `127.0.0.1` and opens it in your browser; it does not require a VPS, cloud
 backend, or installation. Chromium-based browsers currently provide the Web
-Serial connection used by **Connect**.
+Serial connection used by **Connect**. If Studio is locked, the configurator
+asks you to press your unlock key and continues once you do (configurator
+v0.2.2 or later).
 
 After connecting, make a small key change and confirm that it types immediately.
 Use **Restore stock configuration** to remove the runtime overlay and return to
@@ -120,7 +122,7 @@ the compiled keymap.
 The configurator can also show the keyboard's log and both halves' battery
 levels over the same USB connection. These come from the
 [zmk-studio-log](https://github.com/rleyvasal/zmk-studio-log) module and need
-configurator v0.2.1 or later.
+configurator v0.2.2 or later.
 
 Add the module to `config/west.yml`, next to the `zmk` entry from step 1:
 
