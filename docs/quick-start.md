@@ -15,10 +15,10 @@ minor version (any v0.2.x configurator works with any v0.2.x firmware).
 
 ZMK Next has been checked on two keyboards so far:
 
-| Keyboard | Board | Checked how |
-|---|---|---|
-| Totem (split) | Seeed XIAO BLE | Built from this guide and used daily |
-| Corne (split) | nice!nano | Built with the snippet on every weekly release; not run on hardware |
+| Keyboard      | Board          | Checked how                                                         |
+| ------------- | -------------- | ------------------------------------------------------------------- |
+| Totem (split) | Seeed XIAO BLE | Built from this guide and used daily                                |
+| Corne (split) | nice!nano      | Built with the snippet on every weekly release; not run on hardware |
 
 Other keyboards should work if they meet these requirements, but they are untested:
 
