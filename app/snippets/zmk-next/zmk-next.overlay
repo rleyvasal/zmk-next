@@ -4,15 +4,23 @@
  * SPDX-License-Identifier: MIT
  */
 
+/*
+ * Studio RPC on the keyboard's one USB serial port.
+ *
+ * Many Zephyr boards (Seeed XIAO BLE, nRF52840 Dongle, ...) already declare a
+ * USB serial port named board_cdc_acm_uart, which turns on as soon as USB CDC
+ * ACM is enabled. Using the same node name and label here merges into that
+ * port instead of adding a second one, so the host sees a single port either
+ * way; boards without it (nice!nano, ...) get it from this overlay.
+ */
 / {
     chosen {
-        zmk,studio-rpc-uart = &snippet_zmk_next_rpc_uart;
+        zmk,studio-rpc-uart = &board_cdc_acm_uart;
     };
 };
 
 &zephyr_udc0 {
-    snippet_zmk_next_rpc_uart: snippet_zmk_next_rpc_uart {
+    board_cdc_acm_uart: board_cdc_acm_uart {
         compatible = "zephyr,cdc-acm-uart";
     };
 };
-
