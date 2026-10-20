@@ -11,6 +11,30 @@ latest v0.2.x fixes, and nothing that changes the configurator protocol arrives
 until you change the pin. Use a configurator release with the same major and
 minor version (any v0.2.x configurator works with any v0.2.x firmware).
 
+## Tested keyboards and limits
+
+ZMK Next has been checked on two keyboards so far:
+
+| Keyboard      | Board          | Checked how                                                         |
+| ------------- | -------------- | ------------------------------------------------------------------- |
+| Totem (split) | Seeed XIAO BLE | Built from this guide and used daily                                |
+| Corne (split) | nice!nano      | Built with the snippet on every weekly release; not run on hardware |
+
+Other keyboards should work if they meet these requirements, but they are untested:
+
+- **Current ZMK.** ZMK Next follows upstream ZMK `main` (Zephyr 4.1). A config
+  written for ZMK v0.2 or older must use the newer board names
+  (`nice_nano//zmk`, not `nice_nano_v2`), and any third-party modules
+  (displays, pointing devices) must support Zephyr 4.1.
+- **USB on the central half.** The configurator talks to the keyboard over
+  USB, so the half with the snippet needs USB and has to be plugged in.
+  Boards without USB can't use it.
+- **ZMK Studio's requirements:** a physical layout with `keys` (see below)
+  and room for Studio and Runtime Config, which adds flash and RAM use. Small
+  chips may not fit.
+
+If you try another keyboard, please report how it went in an issue.
+
 ## 1. Point `west.yml` at ZMK Next
 
 In your config repo's `config/west.yml`, replace the existing `zmk` project
