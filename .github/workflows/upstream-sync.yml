@@ -2,8 +2,9 @@ name: Upstream sync
 
 # Weekly: merge zmkfirmware/zmk main into this fork, run the Runtime Config
 # tests and the documented two-edit build, then fast-forward main and tag the
-# next patch release (v0.2.0 -> v0.2.1). A conflict or a failing check leaves
-# the merge on the upstream-sync branch and opens an issue instead.
+# next patch release (v0.2.0 -> v0.2.1), and move the minor tag (v0.2) to it.
+# A conflict or a failing check leaves the merge on the upstream-sync branch
+# and opens an issue instead.
 #
 # GITHUB_TOKEN cannot push commits that change .github/workflows, and upstream
 # edits its workflows regularly. Add a fine-grained token with Contents and
@@ -121,11 +122,14 @@ jobs:
           git merge --ff-only "$SHA"
           git push origin HEAD:main
 
-          last="$(git tag --list 'v*' --sort=-v:refname | head -1)"
+          last="$(git tag --list 'v*.*.*' --sort=-v:refname | head -1)"
           IFS=. read -r major minor patch <<< "${last#v}"
           next="v${major}.${minor}.$((patch + 1))"
           git tag "$next" "$SHA"
           git push origin "$next"
+          # Configs that pin the minor tag get every patch release.
+          git tag -f "v${major}.${minor}" "$SHA"
+          git push -f origin "refs/tags/v${major}.${minor}"
 
           gh release create "$next" --title "ZMK Next $next" --notes \
             "Merges upstream ZMK up to zmkfirmware/zmk@${UPSTREAM_SHA:0:12}. No Runtime Config protocol changes: use any ZMK Next Configurator v${major}.${minor}.x release."
