@@ -93,16 +93,46 @@ once:
 
 - The keyboard needs a physical layout with a `keys` property. Most keyboards
   already prepared for ZMK Studio have one.
-- Studio is locked by default. Keep your existing `&studio_unlock` key/combo,
-  or temporarily add `-DCONFIG_ZMK_STUDIO_LOCKING=n` while evaluating ZMK Next.
-  Don't wrap the unlock key in `#ifdef CONFIG_ZMK_STUDIO`: the snippet turns
-  Studio on in Kconfig, which the keymap can't see, so the key would be left
-  out and Studio would stay locked.
+- Studio is locked by default, so the keymap needs a `&studio_unlock` key
+  (see [Add a Studio unlock key](#add-a-studio-unlock-key)).
 - The `zmk-next` snippet puts Studio on the board's USB serial port, so the
   keyboard shows up as one serial port, also on boards such as the Seeed XIAO
   BLE that already have one. It turns off the UART console on that port. A board with a custom or
   conflicting USB CDC setup can instead keep its own Studio RPC snippet and add
   `cmake-args: -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_RUNTIME_CONFIG=y`.
+
+### Add a Studio unlock key
+
+Studio stays locked until you press a `&studio_unlock` key, so the
+configurator can't change anything before then. Most keymaps don't have one,
+including the stock keymaps that ship with ZMK. If yours already does, keep
+it.
+
+Otherwise, add a combo to your `.keymap`. It adds a key without changing any
+existing binding:
+
+```dts
+/ {
+    combos {
+        compatible = "zmk,combos";
+        combo_studio_unlock {
+            key-positions = <0 1>;
+            bindings = <&studio_unlock>;
+        };
+    };
+};
+```
+
+Replace `0 1` with two keys you can press together. Positions count from 0 in
+the order of your keymap's bindings, so `0 1` are the first two keys. If the
+keymap already has a `combos` node, add `combo_studio_unlock` inside it
+instead.
+
+Don't wrap the unlock key in `#ifdef CONFIG_ZMK_STUDIO`: the snippet turns
+Studio on in Kconfig, which the keymap can't see, so the key would be left out
+and Studio would stay locked. To try ZMK Next without an unlock key, you can
+add `-DCONFIG_ZMK_STUDIO_LOCKING=n` to the build's `cmake-args`. This lets any
+program on the computer change the keymap over USB, so don't keep it.
 
 To create layers later from the configurator, reserve the desired number of
 empty layer slots in the keymap. For example:
@@ -180,6 +210,44 @@ panel. The battery chips fill in within about 10 seconds.
   half uses them.
 - For tracking down unexpected restarts, the module also has restart
   diagnostics and a flash-backed black box. See its README.
+
+## 6. Optional: battery levels in the macOS menu bar
+
+[ZMK Battery](https://github.com/rleyvasal/zmk-next-battery) shows both halves'
+levels in the menu bar, for example `L 78% R 15%`, and notifies you at 20% and
+10%. Download it from its
+[Releases page](https://github.com/rleyvasal/zmk-next-battery/releases). It runs
+on macOS 13 or later. The app isn't notarized, so the first launch needs
+**Open Anyway** in System Settings › Privacy & Security.
+
+- **Over Bluetooth** it reads the keyboard's Battery Service and needs no extra
+  firmware options. On a split it also needs
+  `CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_PROXY=y` (plus the fetching option
+  from step 5) to show the peripheral half.
+- **Over USB** it reads the same battery line as the configurator, so it needs
+  step 5's zmk-studio-log setup.
+- It treats the central half as the left one. On a keyboard whose right half
+  is the central, the two levels show swapped.
+- It finds a USB keyboard by ZMK's default USB IDs, so a build with its own
+  USB vendor or product ID isn't found over USB.
+
+## More ZMK Next options
+
+ZMK Next adds a few options of its own, all off by default. They're documented
+with the rest of ZMK's settings:
+
+- [Battery](docs/config/battery.md): holding the level on USB, a charging
+  estimate and charge state, and a settle time after unplugging.
+- [Split](docs/config/split.md): a slower split interval while idle, keeping a
+  disconnected half's last battery level, and swapping the battery services
+  for host apps that expect the right half first.
+- [System](docs/config/system.md): typing only over USB while the cable is in,
+  and not advertising to computers over Bluetooth while on USB.
+
+`CONFIG_ZMK_SPLIT_BLE_IDLE_INT` needs a Zephyr controller fix that ZMK's
+Zephyr doesn't have yet. Without it, the split link can drop about a second
+after the first key press that ends an idle period. The option's help text
+names the Zephyr branch with the fix.
 
 ## Updating later
 
