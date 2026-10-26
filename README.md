@@ -12,6 +12,12 @@ runtime dispatch, safe activation, and persistent configuration generations.
 The initial architecture is documented in
 [`docs/architecture/runtime-config.md`](docs/architecture/runtime-config.md).
 
+> **A personal project, shared as-is.** ZMK Next is built for my own keyboard
+> (a Totem) and shared in case the code or ideas are useful to others. Use it,
+> fork it or borrow from it freely, but there's no promise of support, fixes or
+> long-term maintenance. Issues and pull requests are welcome, but may not get
+> an answer.
+
 ## Try it on a keyboard
 
 Your existing config repo needs two edits, plus an unlock key in most keymaps:
@@ -25,8 +31,10 @@ Your existing config repo needs two edits, plus an unlock key in most keymaps:
 5. Run the downloadable ZMK Next Configurator locally and connect in a
    Web Serial-capable browser.
 
-Tried it on your keyboard? [Report how it went](https://github.com/rleyvasal/zmk-next/issues/new?template=keyboard-report.yml),
-whether it worked or not.
+Tried it on your keyboard? You're welcome to
+[leave a keyboard report](https://github.com/rleyvasal/zmk-next/issues/new?template=keyboard-report.yml),
+whether it worked or not. It helps others see what's been tried, though it may
+not get a reply.
 
 See the [generic integration guide](docs/quick-start.md) for copy-and-paste
 examples for both single-piece and split keyboards, plus the few ZMK Studio

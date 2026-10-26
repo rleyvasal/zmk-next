@@ -1,13 +1,15 @@
 name: Keyboard report
-description: You tried ZMK Next on a keyboard. Tell us how it went, whether it worked or not.
+description: You tried ZMK Next on a keyboard. Share how it went, whether it worked or not.
 title: "Keyboard report: "
 labels: ["keyboard report"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for trying ZMK Next. Reports from keyboards other than the Totem are what tell us the
-        [quick start](https://github.com/rleyvasal/zmk-next/blob/main/docs/quick-start.md) works.
+        Thanks for trying ZMK Next. Reports show others which keyboards the
+        [quick start](https://github.com/rleyvasal/zmk-next/blob/main/docs/quick-start.md) has been tried on.
+
+        ZMK Next is a personal project, shared as-is, so a report may not get a reply or a fix.
   - type: input
     id: keyboard
     attributes:
