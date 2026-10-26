@@ -28,6 +28,17 @@ examples for both single-piece and split keyboards, plus the few ZMK Studio
 prerequisites that firmware cannot infer automatically. So far it has been
 checked on the Totem and the Corne; the guide lists what other keyboards need.
 
+## Companion projects
+
+- [ZMK Next Configurator](https://github.com/rleyvasal/zmk-next-configurator):
+  the local keymap editor that connects to the keyboard over USB.
+- [zmk-studio-log](https://github.com/rleyvasal/zmk-studio-log): a module that
+  streams the keyboard's log and battery levels to the configurator.
+- [ZMK Battery](https://github.com/rleyvasal/zmk-next-battery): a macOS menu
+  bar app showing both halves' battery, over Bluetooth or USB.
+- [zmk-next-messages](https://github.com/rleyvasal/zmk-next-messages): the
+  protocol shared by the firmware and the configurator.
+
 ZMK Next is based on [ZMK Firmware](https://zmk.dev/), the MIT-licensed keyboard
 firmware built on the [Zephyr Project](https://www.zephyrproject.org/) RTOS. The
 upstream documentation and community remain the reference for its compiled
