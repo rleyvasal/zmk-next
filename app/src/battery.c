@@ -126,7 +126,7 @@ static bool settling(int64_t now) {
 
 /* Fold one sample into the cell level. charger: -1 without a status pin, 1
  * charging, 0 charge complete. On external power the live reading is charge
- * voltage, so it is never taken as the cell level. */
+ * voltage, so it is never taken as the cell level, only as a ceiling on it. */
 static void track_cell_level(uint8_t live_soc, bool vbus, int charger, int64_t now) {
     if (!vbus) {
         if (prev_vbus) {
@@ -152,6 +152,18 @@ static void track_cell_level(uint8_t live_soc, bool vbus, int charger, int64_t n
     }
     prev_vbus = true;
 
+    /* On external power the reading is at or above the cell's own voltage, so
+     * it bounds the cell level from above. A remembered level over it is stale:
+     * on-battery levels are kept in RAM only, and a cell that drained until it
+     * reset left the level from before. Restart the estimate from the reading. */
+    if (charge_start_soc > live_soc) {
+        charge_start_soc = live_soc;
+        charge_start_at = now;
+    }
+    if (have_last_cell && last_cell_soc > live_soc) {
+        last_cell_soc = live_soc;
+    }
+
     if (charger == 0) {
         /* Not charging on external power. That is a finished charge only if
          * one ran since plugging in: chargers also stay idle when plugged in
@@ -169,8 +181,9 @@ static void track_cell_level(uint8_t live_soc, bool vbus, int charger, int64_t n
     }
     charge_state = ZMK_BATTERY_CHARGE_STATE_CHARGING;
 
-    int estimate = charge_estimate(charge_start_soc, now - charge_start_at, CHARGE_CURRENT_UA,
-                                   BATTERY_CAPACITY_UAH);
+    int estimate = MIN(charge_estimate(charge_start_soc, now - charge_start_at, CHARGE_CURRENT_UA,
+                                       BATTERY_CAPACITY_UAH),
+                       live_soc);
     if (estimate > (have_last_cell ? last_cell_soc : -1)) {
         last_cell_soc = estimate;
         have_last_cell = true;
