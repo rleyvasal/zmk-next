@@ -1,0 +1,61 @@
+name: Keyboard report
+description: You tried ZMK Next on a keyboard. Tell us how it went, whether it worked or not.
+title: "Keyboard report: "
+labels: ["keyboard report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying ZMK Next. Reports from keyboards other than the Totem are what tell us the
+        [quick start](https://github.com/rleyvasal/zmk-next/blob/main/docs/quick-start.md) works.
+  - type: input
+    id: keyboard
+    attributes:
+      label: Keyboard
+      description: Name, and whether it's split.
+      placeholder: Corne, split
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Board and shield
+      description: The `board` and `shield` values from your `build.yaml`.
+      placeholder: nice_nano//zmk, corne_left / corne_right
+    validations:
+      required: true
+  - type: input
+    id: config
+    attributes:
+      label: Config repository
+      description: A link to your config repo, if it's public.
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: ZMK Next pin, configurator version, and zmk-studio-log pin if you added it.
+      placeholder: v0.2-branch, configurator v0.2.3, zmk-studio-log v0.1-branch
+    validations:
+      required: true
+  - type: checkboxes
+    id: steps
+    attributes:
+      label: What worked
+      options:
+        - label: The firmware built
+        - label: Typing works on every half
+        - label: The configurator connected
+        - label: A key change from the configurator typed right away
+        - label: The keyboard log and battery levels showed up (step 5)
+  - type: input
+    id: computer
+    attributes:
+      label: Computer and browser
+      placeholder: macOS 15, Chrome 131
+  - type: textarea
+    id: details
+    attributes:
+      label: What happened
+      description: Anything that didn't work or was confusing, with error messages or build logs.
+    validations:
+      required: true

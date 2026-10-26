@@ -5,8 +5,9 @@ your existing config repository, boards, shields, keymap, and normal build
 workflow. The firmware exposes supported keymap changes to the local ZMK Next
 Configurator over ZMK Studio's USB serial connection.
 
-Adding ZMK Next takes two edits: one in `config/west.yml` and one in
-`build.yaml`. The guide pins the `v0.2-branch` release line: each rebuild picks up the
+Adding ZMK Next takes two edits, one in `config/west.yml` and one in
+`build.yaml`, plus a Studio unlock key in the keymap if it doesn't have one
+yet (most don't). The guide pins the `v0.2-branch` release line: each rebuild picks up the
 latest v0.2.x fixes, and nothing that changes the configurator protocol arrives
 until you change the pin. Use a configurator release with the same major and
 minor version (any v0.2.x configurator works with any v0.2.x firmware).
@@ -33,7 +34,9 @@ Other keyboards should work if they meet these requirements, but they are untest
   and room for Studio and Runtime Config, which adds flash and RAM use. Small
   chips may not fit.
 
-If you try another keyboard, please report how it went in an issue.
+If you try another keyboard, please
+[report how it went](https://github.com/rleyvasal/zmk-next/issues/new?template=keyboard-report.yml),
+whether it worked or not.
 
 ## 1. Point `west.yml` at ZMK Next
 
@@ -167,6 +170,17 @@ backend, or installation. Chromium-based browsers currently provide the Web
 Serial connection used by **Connect**. If Studio is locked, the configurator
 asks you to press your unlock key and continues once you do (configurator
 v0.2.2 or later).
+
+On Linux, the browser can open the keyboard's serial port only if your user
+may use serial devices. On most distributions that means the `dialout` group
+(`uucp` on Arch):
+
+```sh
+sudo usermod -aG dialout "$USER"
+```
+
+Log out and back in for the change to apply. Until then, **Connect** shows no
+keyboard or can't open it.
 
 After connecting, make a small key change and confirm that it types immediately.
 Use **Restore stock configuration** to remove the runtime overlay and return to

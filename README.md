@@ -14,14 +14,19 @@ The initial architecture is documented in
 
 ## Try it on a keyboard
 
-Your existing config repo needs two edits:
+Your existing config repo needs two edits, plus an unlock key in most keymaps:
 
 1. Point the `zmk` project in `config/west.yml` at a ZMK Next release line
    (`v0.2-branch`).
 2. Add `snippet: zmk-next` to the keyboard's USB/central build in `build.yaml`.
-3. Build and flash the firmware as usual.
-4. Run the downloadable ZMK Next Configurator locally and connect in a
+3. If the keymap has no `&studio_unlock` key, add one. Most stock keymaps
+   don't; the guide has a combo to paste in.
+4. Build and flash the firmware as usual.
+5. Run the downloadable ZMK Next Configurator locally and connect in a
    Web Serial-capable browser.
+
+Tried it on your keyboard? [Report how it went](https://github.com/rleyvasal/zmk-next/issues/new?template=keyboard-report.yml),
+whether it worked or not.
 
 See the [generic integration guide](docs/quick-start.md) for copy-and-paste
 examples for both single-piece and split keyboards, plus the few ZMK Studio

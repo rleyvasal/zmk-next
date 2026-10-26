@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Quick start
+    url: https://github.com/rleyvasal/zmk-next/blob/main/docs/quick-start.md
+    about: Adding ZMK Next to a ZMK config, step by step.
+  - name: ZMK documentation
+    url: https://zmk.dev/docs
+    about: Keymaps, behaviors, boards and shields work as in upstream ZMK. For questions about ZMK itself, not ZMK Next.
