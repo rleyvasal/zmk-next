@@ -133,6 +133,29 @@ int main(void) {
     EXPECT(last_cell_soc == 60);
     sample(31 * MIN_, 100, true, 1);
     EXPECT(last_cell_soc == 82);
+
+    /* Boot on USB after the cell drained until it reset: 92 was persisted at
+     * the previous plug-in, the 0 on battery was lost. The reading (3357 mV,
+     * 0) bounds the cell, and the estimate starts again from it. */
+    reset();
+    have_last_cell = true; /* settings_load() */
+    last_cell_soc = 92;
+    sample(0, 0, true, -1);
+    EXPECT(last_cell_soc == 0 && zmk_battery_reported_soc() == 0);
+    sample(31 * MIN_, 40, true, -1);
+    EXPECT(last_cell_soc == 23); /* 0 + 31 min at 50 mA, below the reading. */
+    sample(61 * MIN_, 100, true, -1);
+    EXPECT(last_cell_soc == 46);
+    sample(62 * MIN_, 30, true, -1); /* A reading under the estimate wins. */
+    EXPECT(last_cell_soc == 30 && zmk_battery_reported_soc() == 30);
+
+    /* The same, with the persisted level arriving after the first sample. */
+    reset();
+    sample(0, 0, true, -1);
+    have_last_cell = true; /* settings_load() */
+    last_cell_soc = 92;
+    sample(1 * MIN_, 2, true, -1);
+    EXPECT(last_cell_soc == 2 && zmk_battery_reported_soc() == 2);
     return 0;
 }
 """
