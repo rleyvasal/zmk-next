@@ -12,6 +12,11 @@ latest v0.2.x fixes, and nothing that changes the configurator protocol arrives
 until you change the pin. Use a configurator release with the same major and
 minor version (any v0.2.x configurator works with any v0.2.x firmware).
 
+> ZMK Next is a personal project, shared as-is. There's no promise of support
+> or long-term maintenance. To go back to upstream ZMK at any time, restore
+> your original `zmk` entry in `config/west.yml`, remove `snippet: zmk-next`
+> from `build.yaml`, and rebuild.
+
 ## Tested keyboards and limits
 
 ZMK Next has been checked on two keyboards so far:
@@ -34,9 +39,10 @@ Other keyboards should work if they meet these requirements, but they are untest
   and room for Studio and Runtime Config, which adds flash and RAM use. Small
   chips may not fit.
 
-If you try another keyboard, please
-[report how it went](https://github.com/rleyvasal/zmk-next/issues/new?template=keyboard-report.yml),
-whether it worked or not.
+If you try another keyboard, you're welcome to
+[leave a keyboard report](https://github.com/rleyvasal/zmk-next/issues/new?template=keyboard-report.yml),
+whether it worked or not. Reports show others what's been tried, but may not
+get a reply.
 
 ## 1. Point `west.yml` at ZMK Next
 
