@@ -19,6 +19,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include <zmk/event_manager.h>
 #include <zmk/battery.h>
+#include <zmk/battery_curve.h>
 #include <zmk/events/battery_state_changed.h>
 #include <zmk/events/activity_state_changed.h>
 #if IS_ENABLED(CONFIG_ZMK_USB) && IS_ENABLED(CONFIG_ZMK_BATTERY_HOLD_ON_EXTERNAL_POWER)
@@ -303,6 +304,9 @@ static const struct device *battery;
 
 #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING_FETCH_MODE_LITHIUM_VOLTAGE)
 static uint8_t lithium_ion_mv_to_pct(int16_t bat_mv) {
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_LIPO_DISCHARGE_CURVE)
+    return zmk_battery_lipo_mv_to_pct(bat_mv);
+#else
     // Simple linear approximation of a battery based off adafruit's discharge graph:
     // https://learn.adafruit.com/li-ion-and-lipoly-batteries/voltages
 
@@ -313,6 +317,7 @@ static uint8_t lithium_ion_mv_to_pct(int16_t bat_mv) {
     }
 
     return bat_mv * 2 / 15 - 459;
+#endif
 }
 
 #endif // IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING_FETCH_MODE_LITHIUM_VOLTAGE)

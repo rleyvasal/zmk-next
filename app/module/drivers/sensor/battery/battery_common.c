@@ -6,6 +6,8 @@
 
 #include <errno.h>
 #include <zephyr/drivers/sensor.h>
+#include <zephyr/sys/util.h>
+#include <zmk/battery_curve.h>
 
 #include "battery_common.h"
 
@@ -30,6 +32,9 @@ int battery_channel_get(const struct battery_value *value, enum sensor_channel c
 }
 
 uint8_t lithium_ion_mv_to_pct(int16_t bat_mv) {
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_LIPO_DISCHARGE_CURVE)
+    return zmk_battery_lipo_mv_to_pct(bat_mv);
+#else
     // Simple linear approximation of a battery based off adafruit's discharge graph:
     // https://learn.adafruit.com/li-ion-and-lipoly-batteries/voltages
 
@@ -40,4 +45,5 @@ uint8_t lithium_ion_mv_to_pct(int16_t bat_mv) {
     }
 
     return bat_mv * 2 / 15 - 459;
+#endif
 }
