@@ -54,7 +54,7 @@ class LipoCurveTests(unittest.TestCase):
             executable = str(Path(directory) / "lipo_curve")
             subprocess.run(
                 [os.environ.get("CC", "cc"), "-Wall", "-Wextra", "-Werror",
-                 "-I", str(APP / "include"), "-x", "c", "-", "-o", executable],
+                 "-I", str(APP / "module/include"), "-x", "c", "-", "-o", executable],
                 input=HARNESS, text=True, check=True, timeout=30,
             )
             subprocess.run([executable], check=True, timeout=3)
