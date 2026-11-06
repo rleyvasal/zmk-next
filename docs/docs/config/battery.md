@@ -18,6 +18,7 @@ Definition file: [zmk/app/Kconfig](https://github.com/zmkfirmware/zmk/blob/main/
 | `CONFIG_ZMK_BATTERY_HOLD_ON_EXTERNAL_POWER`  | bool | While on USB power, report the last level measured on battery (kept across restarts) instead of the charge-voltage reading. With a `zmk,battery-charger` node, also report charging, full and an estimated level | n       |
 | `CONFIG_ZMK_BATTERY_CHARGE_STATUS`           | bool | Publish the charge state in the BAS Battery Level Status characteristic (0x2BED). Selects `CONFIG_ZMK_BATTERY_HOLD_ON_EXTERNAL_POWER`                                                                            | n       |
 | `CONFIG_ZMK_BATTERY_SETTLE_AFTER_CHARGE_SEC` | int  | Keep the charged level for this long after USB power is removed, while the cell voltage settles                                                                                                                  | 0       |
+| `CONFIG_ZMK_BATTERY_LIPO_DISCHARGE_CURVE`    | bool | Map voltage to level with a LiPo discharge curve instead of a straight line from 3.45 V to 4.2 V, which reads high near empty                                                                                    | n       |
 
 :::note[Default setting]
 

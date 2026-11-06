@@ -602,6 +602,18 @@ config ZMK_BATTERY_SETTLE_AFTER_CHARGE_SEC
 
 endif # ZMK_BATTERY_REPORTING
 
+config ZMK_BATTERY_LIPO_DISCHARGE_CURVE
+    bool "Map battery voltage to a level with a LiPo discharge curve"
+    help
+      By default the level is a straight line from 3.45 V (0%) to 4.2 V (100%).
+      A LiPo cell spends most of its charge between about 3.7 and 3.9 V and
+      falls quickly below 3.65 V, so that line reads high near empty: 3.61 V
+      reports 21% with about 5% left. With this option the level follows a
+      typical LiPo discharge curve instead (zmk_battery_lipo_mv_to_pct() in
+      zmk/battery_curve.h), so low levels mean what they say. Applies to the
+      voltage-divider and nRF VDDH battery drivers and to the Lithium Voltage
+      fetch mode.
+
 config ZMK_IDLE_TIMEOUT
     int "Milliseconds of inactivity before entering idle state (OLED shutoff, etc)"
     default 30000
